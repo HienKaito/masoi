@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="Ma Sói: Ngôi Làng Huyền Bí — Trò chơi suy luận nhiều người chơi">
+    <title>Ma Sói</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href="favicon.png">
+</head>
+
+<body>
+
+    <!-- Ambient background -->
+    <div id="particles-js" aria-hidden="true"></div>
+
+    <!-- Decorative floating orbs -->
+    <div class="orb orb-1" aria-hidden="true"></div>
+    <div class="orb orb-2" aria-hidden="true"></div>
+    <div class="orb orb-3" aria-hidden="true"></div>
+
+    <!-- Media toggles -->
+    <div style="position: fixed; top: 20px; left: 20px; z-index: 100; display: flex; gap: 10px;">
+        <button id="btn-toggle-music" class="music-toggle" aria-label="Bật/Tắt Nhạc" title="Nhạc nền"
+            style="position: relative; top: 0; left: 0;">🔊</button>
+        <button id="btn-mic" class="music-toggle" aria-label="Bật/Tắt Mic" title="Voice Chat"
+            style="position: relative; top: 0; left: 0; display: none;">🎙</button>
+    </div>
+
+    <!-- Global notifications -->
+    <div id="notification-container" role="alert" aria-live="polite"></div>
+
+    <div class="container">
+
+        <!-- ══════════════════════════════════════
+         SCREEN 1: ĐĂNG NHẬP
+    ══════════════════════════════════════ -->
+        <section id="login-screen" class="screen active" aria-label="Màn hình đăng nhập">
+            <div class="login-card">
+                <!-- Moon decoration -->
+                <div class="moon-deco" aria-hidden="true">🌕</div>
+
+                <div class="brand">
+                    <h1 class="game-title">MA SÓI</h1>
+                    <p class="subtitle">Ngôi Làng Huyền Bí</p>
+                </div>
+
+                <div class="login-divider">
+                    <span class="wolf-icon" aria-hidden="true">🐺</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="player-name" class="form-label">Tên của bạn</label>
+                    <input type="text" id="player-name" placeholder="Nhập biệt danh..." maxlength="15"
+                        autocomplete="off" spellcheck="false">
+                    <button id="btn-enter" class="btn primary btn-lg">
+                        <span class="btn-icon">🌙</span> Vào Làng
+                    </button>
+                </div>
+
+                <p class="login-hint">Cần 8–16 người để chơi tốt nhất</p>
+            </div>
+        </section>
+
+        <!-- ══════════════════════════════════════
+         SCREEN 2: CHỌN PHÒNG
+    ══════════════════════════════════════ -->
+        <section id="lobby-selection-screen" class="screen hidden" aria-label="Chọn phòng">
+            <div class="lobby-header">
+                <h2>Bắt Đầu Trận Mới</h2>
+                <p class="lobby-sub">Tạo phòng hoặc tham gia phòng đã có</p>
+            </div>
+
+            <div class="lobby-actions">
+                <!-- Tạo phòng -->
+                <div class="action-card card-create">
+                    <div class="card-icon" aria-hidden="true">🏰</div>
+                    <h3>Tạo Làng Mới</h3>
+                    <p>Làm chủ phòng, cấu hình và mời bạn bè.</p>
+                    <button id="btn-create-room" class="btn primary">Tạo Phòng</button>
+                </div>
+
+                <div class="action-divider" aria-hidden="true">
+                    <div class="divider-line"></div>
+                    <span>HOẶC</span>
+                    <div class="divider-line"></div>
+                </div>
+
+                <!-- Vào phòng -->
+                <div class="action-card card-join">
+                    <div class="card-icon" aria-hidden="true">🚪</div>
+                    <h3>Vào Làng</h3>
+                    <p>Nhập mã 4 ký tự từ chủ phòng.</p>
+                    <div class="join-form">
+                        <input type="text" id="room-code-input" placeholder="ABCD" maxlength="4" autocomplete="off"
+                            spellcheck="false" aria-label="Mã phòng">
+                        <button id="btn-join-room" class="btn secondary">Vào Phòng</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══════════════════════════════════════
+         SCREEN 3: SẢNH CHỜ
+    ══════════════════════════════════════ -->
+        <section id="waiting-room-screen" class="screen hidden" aria-label="Sảnh chờ">
+            <header class="room-header">
+                <h2>Sảnh Chờ</h2>
+                <div class="room-code-display" aria-label="Mã phòng">
+                    <span class="code-label">Mã phòng</span>
+                    <span id="display-room-code" class="code-value">----</span>
+                    <span class="code-hint">📋 Chia sẻ với bạn bè</span>
+                </div>
+            </header>
+
+            <div class="waiting-body">
+                <!-- Danh sách người chơi -->
+                <div class="players-list-container">
+                    <div class="panel-header">
+                        <h3>👥 Người Chơi</h3>
+                        <span class="badge" id="player-count">0</span>
+                    </div>
+                    <ul id="waiting-players-list" aria-label="Danh sách người chơi"></ul>
+                </div>
+
+                <!-- Cài đặt (chỉ host thấy) -->
+                <div class="host-controls">
+                    <p id="host-message" class="host-msg hidden">
+                        👑 Bạn là chủ phòng — Cấu hình và bắt đầu trận đấu.
+                    </p>
+
+                    <div id="game-settings" class="game-settings hidden">
+                        <h3>⚙️ Cài Đặt Trận</h3>
+
+                        <div class="settings-divider">Tùy chỉnh số lượng Vai trò</div>
+
+                        <div class="roles-container">
+                            <div class="roles-group">
+                                <div class="group-header">🏘️ Phe Dân Làng</div>
+                                <div class="roles-toggles">
+                                    <div class="role-item" title="Dân thường, không có năng lực">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🧑‍🌾</span>
+                                            <span>Dân Làng</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-villager">−</button>
+                                            <input type="number" id="count-villager" min="0" max="20" value="3" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-villager">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="Soi phe: Tốt, Xấu hoặc Không xác định">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🔮</span>
+                                            <span>Tiên Tri</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-aura-seer">−</button>
+                                            <input type="number" id="count-aura-seer" min="0" max="10" value="1" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-aura-seer">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="Tạo khiên bảo vệ ai đó vào ban đêm">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">💉</span>
+                                            <span>Bác Sĩ</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-doctor">−</button>
+                                            <input type="number" id="count-doctor" min="0" max="10" value="1" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-doctor">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="Có 1 bình cứu và 1 bình độc">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🧪</span>
+                                            <span>Phù Thủy</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-witch">−</button>
+                                            <input type="number" id="count-witch" min="0" max="10" value="1" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-witch">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="1 lần ban ngày tạt nước thánh. Sói chết, người Tốt thì Priest chết">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">✝️</span>
+                                            <span>Linh Mục</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-priest">−</button>
+                                            <input type="number" id="count-priest" min="0" max="10" value="0" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-priest">+</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="roles-group">
+                                <div class="group-header">🐺 Phe Ma Sói</div>
+                                <div class="roles-toggles">
+                                    <div class="role-item" title="Sói thường">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🐺</span>
+                                            <span>Ma Sói</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-werewolf">−</button>
+                                            <input type="number" id="count-werewolf" min="0" max="10" value="1" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-werewolf">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="Sói có 2 lần ru ngủ 1 người khiến họ không thể hành động đêm hôm sau">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🌙</span>
+                                            <span>Sói Ác Mộng</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-nightmare-werewolf">−</button>
+                                            <input type="number" id="count-nightmare-werewolf" min="0" max="10" value="0" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-nightmare-werewolf">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="Sói soi vai trò, không được giết trừ khi từ bỏ quyền Soi">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">👁️</span>
+                                            <span>Sói Tiên Tri</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-wolf-seer">−</button>
+                                            <input type="number" id="count-wolf-seer" min="0" max="10" value="0" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-wolf-seer">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="Mỗi ván 1 lần, nguyền rủa 1 người thành Sói thay vì giết.">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">☣️</span>
+                                            <span>Sói Nguyền</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-cursed-wolf">−</button>
+                                            <input type="number" id="count-cursed-wolf" min="0" max="10" value="0" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-cursed-wolf">+</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="roles-group">
+                                <div class="group-header">⚖️ Phe Trung Lập</div>
+                                <div class="roles-toggles">
+                                    <div class="role-item" title="Phe thứ 3. Mỗi đêm tưới xăng 2 người hoặc châm lửa">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🔥</span>
+                                            <span>Kẻ Phóng Hỏa</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-arsonist">−</button>
+                                            <input type="number" id="count-arsonist" min="0" max="10" value="0" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-arsonist">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="Dân thường, thắng nếu bị treo cổ">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🃏</span>
+                                            <span>Kẻ Ngốc</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-fool">−</button>
+                                            <input type="number" id="count-fool" min="0" max="10" value="0" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-fool">+</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-divider">Tùy chọn</div>
+
+                        <label class="role-toggle full-width">
+                            <input type="checkbox" id="reveal-on-death" checked>
+                            <span class="toggle-icon">👁️</span>
+                            <span>Hiện vai trò khi chết</span>
+                        </label>
+                    </div>
+
+                    <button id="btn-start-game" class="btn primary btn-lg hidden">
+                        ⚔️ Bắt Đầu Trận
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══════════════════════════════════════
+         SCREEN 4: MÀN HÌNH GAME
+    ══════════════════════════════════════ -->
+        <section id="game-screen" class="screen hidden" aria-label="Màn hình chơi game">
+            <div class="game-layout">
+
+                <!-- ── Cột trái: Trạng thái & Vai trò ── -->
+                <aside class="sidebar" aria-label="Thông tin game">
+
+                    <div class="game-status-panel panel">
+                        <div class="phase-badge">
+                            <h2 id="phase-indicator">Đang chờ...</h2>
+                        </div>
+                        <div class="timer-wrap">
+                            <div class="timer" id="timer-display">--</div>
+                            <div class="timer-label">giây còn lại</div>
+                        </div>
+                    </div>
+
+                    <div class="my-role-panel panel">
+                        <h3>🎭 Vai Trò Của Bạn</h3>
+                        <div id="my-role-display" class="role-card">?</div>
+                        <div id="role-turn-timer" class="turn-timer" aria-live="polite"></div>
+                    </div>
+
+                </aside>
+
+                <!-- ── Vùng trung tâm: Vòng tròn nhân vật ── -->
+                <main class="arena" aria-label="Khu vực người chơi">
+                    <div id="game-players-grid" class="players-circle"></div>
+                </main>
+
+                <!-- ── Cột phải: Chat ── -->
+                <div class="chat-section" aria-label="Khu vực trò chuyện">
+                    <!-- Tabs -->
+                    <nav class="chat-tabs" role="tablist">
+                        <button class="tab-btn active" role="tab" aria-selected="true" data-target="general-chat"
+                            id="general-tab">
+                            💬 Chung
+                        </button>
+                        <button class="tab-btn hidden" role="tab" aria-selected="false" data-target="werewolf-chat"
+                            id="werewolf-tab">
+                            🐺 Bầy Sói
+                        </button>
+                        <button class="tab-btn hidden" role="tab" aria-selected="false" data-target="ghost-chat"
+                            id="ghost-tab">
+                            👻 Hồn Ma
+                        </button>
+                    </nav>
+
+                    <!-- Chat boxes -->
+                    <div class="chat-container" role="tabpanel">
+                        <div id="general-chat" class="chat-box" aria-label="Chat chung"></div>
+                        <div id="werewolf-chat" class="chat-box hidden" aria-label="Chat bầy sói"></div>
+                        <div id="ghost-chat" class="chat-box hidden" aria-label="Chat hồn ma"></div>
+                    </div>
+
+                    <!-- Input -->
+                    <div class="chat-input-area">
+                        <input type="text" id="chat-input" placeholder="Nhập tin nhắn..." autocomplete="off"
+                            aria-label="Ô nhập chat" maxlength="200">
+                        <button id="btn-send-chat" class="btn primary btn-send">Gửi</button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Modal vote / hành động ban ngày -->
+            <div id="action-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="action-title">
+                <div class="modal-content">
+                    <h3 id="action-title">Hành Động</h3>
+                    <p id="action-description">Chọn một mục tiêu.</p>
+                    <div id="action-targets" class="targets-list"></div>
+                    <div class="modal-actions">
+                        <button id="btn-cancel-action" class="btn secondary">Hủy</button>
+                        <button id="btn-confirm-action" class="btn primary">Xác Nhận</button>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Slot Machine Overlay -->
+        <div id="role-reveal-overlay" class="overlay hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; display: flex; justify-content: center; align-items: center; flex-direction: column;">
+            <div class="slot-machine-container" style="text-align: center; color: white;">
+                <h2>Vai trò của bạn là...</h2>
+                <div class="slot-window" style="width: 250px; height: 100px; overflow: hidden; border: 4px solid var(--accent-color, #ffd700); border-radius: 10px; background: #222; margin: 20px auto; position: relative;">
+                    <div id="slot-reel" class="slot-reel" style="display: flex; flex-direction: column; transition: transform 3s cubic-bezier(0.1, 0.7, 0.1, 1);">
+                        <!-- dynamic items -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /.container -->
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

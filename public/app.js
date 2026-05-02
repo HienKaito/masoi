@@ -19,10 +19,29 @@ let peerConnections = {}; // socketId -> RTCPeerConnection
 const rtcConfig = { 
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' }, 
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
+        {
+          urls: "stun:stun.relay.metered.ca:80",
+        },
+        {
+          urls: "turn:sg.relay.metered.ca:80",
+          username: "c86e8b7db7b23a6e14f3fa8d",
+          credential: "2r8jff6rV4UCqght",
+        },
+        {
+          urls: "turn:sg.relay.metered.ca:80?transport=tcp",
+          username: "c86e8b7db7b23a6e14f3fa8d",
+          credential: "2r8jff6rV4UCqght",
+        },
+        {
+          urls: "turn:sg.relay.metered.ca:443",
+          username: "c86e8b7db7b23a6e14f3fa8d",
+          credential: "2r8jff6rV4UCqght",
+        },
+        {
+          urls: "turns:sg.relay.metered.ca:443?transport=tcp",
+          username: "c86e8b7db7b23a6e14f3fa8d",
+          credential: "2r8jff6rV4UCqght",
+        },
     ] 
 };
 let localMutes = {}; // targetId -> boolean
@@ -269,6 +288,20 @@ function createPeerConnection(peerId) {
             document.body.appendChild(audio);
         }
         audio.srcObject = event.streams[0];
+        
+        // Cố gắng phát âm thanh, nếu bị chặn thì log ra
+        audio.play().catch(e => {
+            console.warn("Autoplay bị chặn bởi trình duyệt. Cần tương tác người dùng để phát tiếng:", e);
+            showNotification("Trình duyệt đang chặn âm thanh. Hãy nhấn vào màn hình để nghe mọi người nói.");
+            
+            // Thêm sự kiện click để resume nếu bị chặn
+            const resumeAudio = () => {
+                audio.play();
+                document.removeEventListener('click', resumeAudio);
+            };
+            document.addEventListener('click', resumeAudio);
+        });
+
         updateAudioMutes();
         setupAnalyzer(peerId, event.streams[0]);
     };

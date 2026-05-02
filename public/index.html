@@ -391,6 +391,23 @@
             </div>
         </div>
 
+        <!-- Win Screen Overlay -->
+        <div id="win-screen" class="overlay hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 2000; display: flex; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(15px);">
+            <div class="win-content" style="text-align: center; color: white; max-width: 700px; width: 90%;">
+                <div id="win-icon" style="font-size: 5rem; margin-bottom: 1rem; filter: drop-shadow(0 0 20px rgba(255,255,255,0.5));">🏆</div>
+                <h1 id="win-message" style="margin-bottom: 0.5rem; text-transform: uppercase;">Dân Làng Thắng!</h1>
+                <p id="win-sub" style="color: var(--highlight); letter-spacing: 2px; margin-bottom: 2rem;">Tất cả sói đã bị tiêu diệt</p>
+                
+                <div id="win-players-list" class="win-players-grid">
+                    <!-- Players and roles will be injected here -->
+                </div>
+                
+                <div class="win-footer" style="margin-top: 2rem; color: var(--text-dim); font-size: 0.9rem;">
+                    Quay về sảnh sau <span id="win-timer" style="color: var(--highlight); font-weight: bold; font-size: 1.2rem;">10</span> giây...
+                </div>
+            </div>
+        </div>
+
     </div><!-- /.container -->
 
     <script src="/socket.io/socket.io.js"></script>

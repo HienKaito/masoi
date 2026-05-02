@@ -16,33 +16,20 @@ let currentWerewolfVotes = [];
 let localStream = null;
 let isMicEnabled = false;
 let peerConnections = {}; // socketId -> RTCPeerConnection
-const rtcConfig = { 
+const rtcConfig = {
     iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }, 
+        { urls: ["stun:stun.turnix.io:3478"] },
         {
-          urls: "stun:stun.relay.metered.ca:80",
-        },
-        {
-          urls: "turn:sg.relay.metered.ca:80",
-          username: "c86e8b7db7b23a6e14f3fa8d",
-          credential: "2r8jff6rV4UCqght",
-        },
-        {
-          urls: "turn:sg.relay.metered.ca:80?transport=tcp",
-          username: "c86e8b7db7b23a6e14f3fa8d",
-          credential: "2r8jff6rV4UCqght",
-        },
-        {
-          urls: "turn:sg.relay.metered.ca:443",
-          username: "c86e8b7db7b23a6e14f3fa8d",
-          credential: "2r8jff6rV4UCqght",
-        },
-        {
-          urls: "turns:sg.relay.metered.ca:443?transport=tcp",
-          username: "c86e8b7db7b23a6e14f3fa8d",
-          credential: "2r8jff6rV4UCqght",
-        },
-    ] 
+            username: "a8be6035-3260-4d94-9fee-779246182107",
+            credential: "182a38c7b6afd333307818b0b15d9777",
+            urls: [
+                "turn:eu-central.turnix.io:3478?transport=udp",
+                "turn:eu-central.turnix.io:3478?transport=tcp",
+                "turns:eu-central.turnix.io:443?transport=udp",
+                "turns:eu-central.turnix.io:443?transport=tcp"
+            ]
+        }
+    ]
 };
 let localMutes = {}; // targetId -> boolean
 
@@ -103,7 +90,7 @@ const audioManager = {
     currentTrack: null,
     isMuted: false,
     volumes: {
-        lobby: 0.3,
+        lobby: 0.1,
         day: 0.3,
         night: 0.8
     },
@@ -288,12 +275,12 @@ function createPeerConnection(peerId) {
             document.body.appendChild(audio);
         }
         audio.srcObject = event.streams[0];
-        
+
         // Cố gắng phát âm thanh, nếu bị chặn thì log ra
         audio.play().catch(e => {
             console.warn("Autoplay bị chặn bởi trình duyệt. Cần tương tác người dùng để phát tiếng:", e);
             showNotification("Trình duyệt đang chặn âm thanh. Hãy nhấn vào màn hình để nghe mọi người nói.");
-            
+
             // Thêm sự kiện click để resume nếu bị chặn
             const resumeAudio = () => {
                 audio.play();
@@ -318,7 +305,7 @@ function createPeerConnection(peerId) {
 
             delete analysers[peerId];
             updateSpeakingUI(peerId, false);
-            
+
             // Nếu failed, có thể do Firewall chặn UDP, cần TURN server
             if (pc.iceConnectionState === 'failed') {
                 showNotification('Kết nối Voice Chat thất bại. Có thể do Firewall/NAT của bạn chặn kết nối P2P.');
@@ -720,17 +707,17 @@ const roleTranslations = {
 };
 
 const roleDescriptions = {
-    'WEREWOLF': 'Mỗi đêm, chọn một người để hạ sát. Giết hết dân làng để chiến thắng.',
-    'AURA_SEER': 'Mỗi đêm, soi một người xem họ thuộc phe Tốt, Xấu hay Không xác định.',
-    'DOCTOR': 'Mỗi đêm, bảo vệ một người. Không cứu cùng một người 2 đêm liên tiếp.',
-    'WITCH': 'Có 1 bình cứu và 1 bình độc. Dùng mỗi bình tối đa 1 lần.',
-    'FOOL': 'Mục tiêu: bị treo cổ! Bị treo cổ là bạn thắng.',
-    'VILLAGER': 'Tham gia thảo luận và bỏ phiếu hàng ngày.',
-    'NIGHTMARE_WEREWOLF': 'Cùng phe sói. Ban ngày có thể ru ngủ 1 người (2 lần/game), đêm hôm sau họ sẽ mất lượt.',
-    'WOLF_SEER': 'Cùng phe sói. Mỗi đêm soi vai trò 1 người. Phải bỏ quyền Soi mới được cắn.',
-    'CURSED_WOLF': 'Cùng phe sói. Mỗi ván 1 lần có thể nguyền rủa 1 người thành Sói (sáng hôm sau sẽ biến đổi).',
-    'ARSONIST': 'Phe thứ 3. Mỗi đêm tưới xăng 2 người HOẶC châm lửa giết người bị douse.',
-    'PRIEST': '1 lần ban ngày, tạt nước thánh 1 người. Sói chết, người tốt thì bạn chết.'
+    'WEREWOLF': 'Phe Ma Sói. Mỗi đêm, cả bầy sói sẽ cùng thống nhất chọn một người để tiêu diệt. Mục tiêu của bạn là tiêu diệt hết Dân Làng hoặc Phe thứ 3 để chiếm lấy ngôi làng.',
+    'AURA_SEER': 'Phe Dân Làng. Mỗi đêm, bạn có thể soi hào quang của một người chơi để biết họ thuộc phe Tốt (Dân làng), Xấu (Ma sói) hay Không xác định (Kẻ phóng hỏa, Kẻ ngốc...).',
+    'DOCTOR': 'Phe Dân Làng. Mỗi đêm, bạn chọn một người để bảo vệ khỏi sự tấn công của Ma Sói. Lưu ý: Bạn không thể bảo vệ cùng một người trong 2 đêm liên tiếp.',
+    'WITCH': 'Phe Dân Làng. Bạn sở hữu 2 lọ thuốc quyền năng: 1 lọ Thuốc Hồi Sinh để cứu người bị sói cắn và 1 lọ Thuốc Độc để tiêu diệt một người. Mỗi lọ chỉ được dùng 1 lần duy nhất.',
+    'FOOL': 'Phe Thứ 3. Mục tiêu duy nhất của bạn là làm mọi cách để Dân Làng nghi ngờ và bỏ phiếu treo cổ bạn vào ban ngày. Nếu bị treo cổ, bạn sẽ thắng cuộc ngay lập tức.',
+    'VILLAGER': 'Phe Dân Làng. Bạn không có kỹ năng đặc biệt ban đêm, nhưng sức mạnh của bạn nằm ở lá phiếu vào ban ngày. Hãy cùng mọi người tìm ra kẻ giả mạo và treo cổ chúng.',
+    'NIGHTMARE_WEREWOLF': 'Phe Ma Sói. Bạn có khả năng ru ngủ một người chơi vào ban ngày (tối đa 2 lần). Người bị ru ngủ sẽ không thể thực hiện kỹ năng của mình vào đêm hôm sau.',
+    'WOLF_SEER': 'Phe Ma Sói. Mỗi đêm, bạn có thể soi chính xác vai trò của một người chơi. Lưu ý: Bạn phải từ bỏ quyền soi (nhấn vào tên mình) thì mới có thể tham gia đi cắn người cùng bầy sói.',
+    'CURSED_WOLF': 'Phe Ma Sói. Mỗi ván đấu một lần, bạn có thể chọn nguyền rủa một người. Người bị nguyền rủa sẽ biến đổi thành Sói vào sáng hôm sau.',
+    'ARSONIST': 'Phe Thứ 3. Mỗi đêm bạn có thể chọn tưới xăng lên 2 người. Bạn có DUY NHẤT 1 mồi lửa để châm ngòi. Khi châm lửa, tất cả những người đã bị tưới xăng từ trước sẽ bị thiêu rụi.',
+    'PRIEST': 'Phe Dân Làng. Một lần vào ban ngày, bạn có thể tạt nước thánh vào một người. Nếu đó là Sói, nó sẽ chết. Nếu là người tốt, chính bạn sẽ bị trừng phạt và chết ngay lập tức.'
 };
 
 function getRoleColor(role) {
@@ -748,11 +735,19 @@ function getRoleColor(role) {
 function setRoleDisplay(role) {
     const name = roleTranslations[role] || role;
     const desc = roleDescriptions[role] || '';
-    myRoleDisplay.innerHTML = `<strong>${name}</strong>${desc ? `<br><small style="font-size:0.65rem; opacity:0.8; font-family: var(--font-body); font-style:italic;">${desc}</small>` : ''}`;
+    myRoleDisplay.innerHTML = `
+        <div style="font-family: var(--font-display); font-size: 1.2rem; margin-bottom: 4px;">${name}</div>
+        <div style="font-size: 0.7rem; line-height: 1.3; opacity: 0.9; font-weight: normal; font-style: italic; max-width: 250px;">
+            ${desc}
+        </div>
+    `;
 
     let roleColor = getRoleColor(role);
     myRoleDisplay.style.color = roleColor;
     myRoleDisplay.style.borderColor = roleColor;
+    myRoleDisplay.style.backgroundColor = 'rgba(0,0,0,0.3)';
+    myRoleDisplay.style.padding = '12px';
+    myRoleDisplay.style.borderRadius = '8px';
 }
 
 function showSlotMachine(finalRole) {
@@ -888,22 +883,65 @@ socket.on('chatMessage', (data) => {
     }
 });
 
-socket.on('gameOver', (roles) => {
+socket.on('gameOver', ({ winnerTeam, roles }) => {
     phaseIndicator.textContent = 'Kết Thúc';
     timerDisplay.textContent = '--';
     document.body.className = '';
 
-    // Render final roles
-    const grid = document.getElementById('game-players-grid');
-    grid.innerHTML = '';
-    roles.forEach(r => {
-        const div = document.createElement('div');
-        div.className = 'player-card';
-        div.innerHTML = `<strong>${r.name}</strong><br><span style="color:var(--accent-color)">${roleTranslations[r.role] || r.role}</span>`;
-        grid.appendChild(div);
+    const winScreen = document.getElementById('win-screen');
+    const winMessage = document.getElementById('win-message');
+    const winSub = document.getElementById('win-sub');
+    const winIcon = document.getElementById('win-icon');
+    const winPlayersList = document.getElementById('win-players-list');
+    const winTimer = document.getElementById('win-timer');
+
+    let teamName = "Dân Làng";
+    let subText = "Tất cả mối đe dọa đã bị loại bỏ.";
+    let icon = "🏘️";
+
+    if (winnerTeam === 'WEREWOLF') {
+        teamName = "Ma Sói";
+        subText = "Bầy sói đã chiếm quyền kiểm soát ngôi làng!";
+        icon = "🐺";
+    } else if (winnerTeam === 'ARSONIST') {
+        teamName = "Kẻ Phóng Hỏa";
+        subText = "Ngôi làng đã biến thành tro bụi!";
+        icon = "🔥";
+    } else if (winnerTeam === 'FOOL') {
+        teamName = "Kẻ Ngốc";
+        subText = "Kẻ Ngốc đã đánh lừa tất cả mọi người!";
+        icon = "🃏";
+    }
+
+    winMessage.textContent = `${teamName} THẮNG!`;
+    winSub.textContent = subText;
+    winIcon.textContent = icon;
+
+    // Render final roles in win screen
+    winPlayersList.innerHTML = '';
+    roles.forEach((r, idx) => {
+        const item = document.createElement('div');
+        item.className = 'win-player-item';
+        item.style.animationDelay = `${idx * 0.1}s`;
+        item.innerHTML = `
+            <img src="${getAvatarUrl(r.name)}" style="width:40px;height:40px;border-radius:50%;border:2px solid var(--border)">
+            <strong style="font-size:0.9rem">${r.name}</strong>
+            <span class="role-name" style="color:${getRoleColor(r.role)}">${roleTranslations[r.role] || r.role}</span>
+        `;
+        winPlayersList.appendChild(item);
     });
 
-    showNotification('Trò chơi kết thúc! Tự động quay về sảnh sau 5 giây...');
+    winScreen.classList.remove('hidden');
+
+    let timeLeft = 10;
+    winTimer.textContent = timeLeft;
+    const interval = setInterval(() => {
+        timeLeft--;
+        winTimer.textContent = timeLeft;
+        if (timeLeft <= 0) clearInterval(interval);
+    }, 1000);
+
+    showNotification(`Trò chơi kết thúc! ${teamName} chiến thắng.`);
 });
 
 socket.on('gameReset', () => {
@@ -924,6 +962,7 @@ socket.on('gameReset', () => {
     generalChat.innerHTML = '';
     werewolfChat.innerHTML = '';
     ghostChat.innerHTML = '';
+    document.getElementById('win-screen').classList.add('hidden');
     switchScreen('waiting');
 });
 
@@ -974,7 +1013,8 @@ function renderPlayersGrid(players) {
         const infoDiv = document.createElement('div');
         let displayContent = `<strong style="font-size:0.8rem">${p.playerIndex}. ${p.name}</strong>`;
         if (p.role) {
-            displayContent += `<br><span style="color:${getRoleColor(p.role)};font-size:0.75rem;font-weight:bold;">${roleTranslations[p.role] || p.role}</span>`;
+            const roleName = roleTranslations[p.role] || p.role;
+            displayContent += `<br><span class="revealed-role" style="color:${getRoleColor(p.role)}">${roleName}</span>`;
         }
         infoDiv.innerHTML = displayContent;
 
@@ -1195,11 +1235,14 @@ function renderPlayersGrid(players) {
 
             if (canTarget) {
                 div.classList.add('clickable');
-                div.title = actionType === 'NIGHTMARE_SLEEP' ? 'Nhấn đúp để ru ngủ (chỉ 2 lần/game)' : 'Nhấn đúp để tạt nước thánh (chỉ 1 lần/game)';
-                div.addEventListener('dblclick', () => {
-                    if (confirm(`Bạn có chắc muốn sử dụng kỹ năng đặc biệt lên ${p.name}?`)) {
-                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
-                    }
+                div.title = actionType === 'NIGHTMARE_SLEEP' ? 'Nhấn để ru ngủ (chỉ 2 lần/game)' : 'Nhấn để tạt nước thánh (chỉ 1 lần/game)';
+                div.addEventListener('click', () => {
+                    actionTitle.textContent = actionType === 'NIGHTMARE_SLEEP' ? 'Kỹ Năng Ru Ngủ' : 'Nước Thánh';
+                    actionDescription.textContent = `Bạn có chắc muốn sử dụng kỹ năng lên ${p.name}?`;
+                    pendingActionType = actionType;
+                    actionTargetId = p.id;
+                    actionTargets.innerHTML = ''; // Not used for this modal mode
+                    actionModal.classList.remove('hidden');
                 });
             }
         }
@@ -1352,6 +1395,27 @@ function triggerDayActionModal(targetPlayer) {
     actionTargets.innerHTML = '';
     actionModal.classList.remove('hidden');
 }
+btnConfirmAction.addEventListener('click', () => {
+    if (pendingActionType && actionTargetId) {
+        socket.emit('playerAction', {
+            roomCode: currentRoomCode,
+            actionType: pendingActionType,
+            targetId: actionTargetId
+        });
+        if (pendingActionType === 'NIGHTMARE_SLEEP') showNotification('Đã chọn ru ngủ mục tiêu.');
+        else if (pendingActionType === 'PRIEST_WATER') showNotification('Đã tạt nước thánh!');
+        else showNotification('Đã thực hiện hành động.');
+    }
+    actionModal.classList.add('hidden');
+    pendingActionType = null;
+    actionTargetId = null;
+});
+
+btnCancelAction.addEventListener('click', () => {
+    actionModal.classList.add('hidden');
+    pendingActionType = null;
+    actionTargetId = null;
+});
 
 // WebRTC Signaling
 socket.on('webrtc-peer-joined', async (peerId) => {

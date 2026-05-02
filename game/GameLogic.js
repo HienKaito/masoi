@@ -29,6 +29,7 @@ class GameLogic {
         this.cursedWolfUsed = false;
         this.cursedWolfTarget = null;
         this.tempArsoTargets = {};
+        this.arsonistIgniteUsed = false;
     }
 
     addPlayer(socketId, name, isHost) {
@@ -38,7 +39,8 @@ class GameLogic {
             name: name,
             isHost: isHost,
             role: null,
-            isAlive: true
+            isAlive: true,
+            seenRoles: {} // targetId -> roleName
         };
         return this.players[socketId];
     }
@@ -73,7 +75,7 @@ class GameLogic {
                 name: p.name,
                 isHost: p.isHost,
                 isAlive: p.isAlive,
-                role: reveal ? p.role : null
+                role: (reveal || (forPlayer && forPlayer.seenRoles && forPlayer.seenRoles[p.id])) ? p.role : null
             };
         });
     }
@@ -269,7 +271,10 @@ class GameLogic {
                     return;
                 }
                 const targetRole = this.players[targetId].role;
+                if (!player.seenRoles) player.seenRoles = {};
+                player.seenRoles[targetId] = targetRole;
                 this.io.to(socketId).emit('systemMessage', `Bạn soi và thấy ${this.players[targetId].name} có vai trò: ${targetRole}.`);
+                this.updateClientState();
             } else if (actionType === 'WOLF_SEER_RESIGN' && player.role === 'WOLF_SEER') {
                 this.wolfSeerResigned = true;
                 this.io.to(socketId).emit('systemMessage', 'Đã từ bỏ quyền Soi. Giờ bạn có thể cắn người!');
@@ -303,6 +308,10 @@ class GameLogic {
                 this.nightActions.push({ type: 'ARSONIST_DOUSE', socketId, targetIds: this.tempArsoTargets[socketId], priority: 1 });
                 this.io.to(socketId).emit('systemMessage', `Đã chọn tưới xăng: ${this.tempArsoTargets[socketId].map(id => this.players[id].name).join(', ')}`);
             } else if (actionType === 'ARSONIST_IGNITE' && player.role === 'ARSONIST') {
+                if (this.arsonistIgniteUsed) {
+                    this.io.to(socketId).emit('error', 'Bạn đã sử dụng mồi lửa duy nhất rồi!');
+                    return;
+                }
                 this.nightActions = this.nightActions.filter(a => a.socketId !== socketId);
                 this.nightActions.push({ type: 'ARSONIST_IGNITE', socketId, priority: 5 });
                 this.io.to(socketId).emit('systemMessage', 'Đã chọn châm lửa!');
@@ -393,6 +402,7 @@ class GameLogic {
                     }
                 });
                 this.arsonistDoused = [];
+                this.arsonistIgniteUsed = true;
             } else if (action.type === 'CURSED_WOLF_TURN') {
                 if (!protections[action.targetId]) protections[action.targetId] = [];
                 protections[action.targetId].push('CURSED_WOLF');
@@ -488,15 +498,24 @@ class GameLogic {
     }
 
     resolveDayVotes() {
+        const alivePlayers = Object.values(this.players).filter(p => p.isAlive);
+        const aliveCount = alivePlayers.length;
         const voteCounts = {};
+        
+        // Count actual votes
         Object.values(this.dayVotes).forEach(targetId => {
             voteCounts[targetId] = (voteCounts[targetId] || 0) + 1;
         });
+
+        // Calculate skip votes (players who are alive but didn't vote)
+        const playersWhoVotedCount = Object.keys(this.dayVotes).length;
+        const skipVotes = aliveCount - playersWhoVotedCount;
 
         let maxVotes = 0;
         let lynchedId = null;
         let tie = false;
 
+        // Find the person with the most votes
         for (const [targetId, votes] of Object.entries(voteCounts)) {
             if (votes > maxVotes) {
                 maxVotes = votes;
@@ -505,6 +524,12 @@ class GameLogic {
             } else if (votes === maxVotes) {
                 tie = true;
             }
+        }
+
+        // If skipVotes is greater than or equal to maxVotes, no one is lynched
+        // Or if there's a tie for the most votes
+        if (skipVotes >= maxVotes || tie) {
+            lynchedId = null;
         }
 
         const roleTranslations = {
@@ -516,7 +541,6 @@ class GameLogic {
             'VILLAGER': 'Dân Làng'
         };
 
-        if (tie) lynchedId = null;
         if (lynchedId) {
             this.players[lynchedId].isAlive = false;
             this.broadcastSystemMessage(`Dân làng đã quyết định treo cổ ${this.players[lynchedId].name}.`);
@@ -527,7 +551,7 @@ class GameLogic {
                 this.broadcastSystemMessage('Kẻ Ngốc đã bị treo cổ! Kẻ Ngốc đã đánh lừa tất cả mọi người và giành chiến thắng!');
                 this.state = 'GAME_OVER';
                 this.updateClientState();
-                this.revealAllRoles();
+                this.revealAllRoles('FOOL');
                 return;
             }
         } else {
@@ -555,38 +579,38 @@ class GameLogic {
             this.state = 'GAME_OVER';
             this.updateClientState();
             this.broadcastSystemMessage('Arsonist đã thiêu rụi cả làng! Arsonist Thắng!');
-            this.revealAllRoles();
+            this.revealAllRoles('ARSONIST');
             return true;
         } else if (wolves.length >= nonWolves && arsonists.length === 0) {
             this.state = 'GAME_OVER';
             this.updateClientState();
             this.broadcastSystemMessage('Ma Sói đã chiếm ưu thế! Ma Sói Thắng!');
-            this.revealAllRoles();
+            this.revealAllRoles('WEREWOLF');
             return true;
         } else if (wolves.length === 0 && arsonists.length === 0) {
             this.state = 'GAME_OVER';
             this.updateClientState();
             this.broadcastSystemMessage('Sói và Kẻ xấu đã bị tiêu diệt! Dân Làng Thắng!');
-            this.revealAllRoles();
+            this.revealAllRoles('VILLAGER');
             return true;
         }
 
         return false;
     }
 
-    revealAllRoles() {
+    revealAllRoles(winnerTeam) {
         const allRoles = Object.values(this.players).map(p => ({
             name: p.name,
             role: p.role
         }));
-        this.io.to(this.roomCode).emit('gameOver', allRoles);
+        this.io.to(this.roomCode).emit('gameOver', { winnerTeam: winnerTeam, roles: allRoles });
 
         // Auto reset to lobby after 5 seconds
         setTimeout(() => {
             if (this.state === 'GAME_OVER') {
                 this.resetGame();
             }
-        }, 5000);
+        }, 10000);
     }
 
     resetGame() {
@@ -609,11 +633,13 @@ class GameLogic {
         this.wolfSeerResigned = false;
         this.cursedWolfUsed = false;
         this.cursedWolfTarget = null;
+        this.arsonistIgniteUsed = false;
         this.tempArsoTargets = {};
 
         Object.values(this.players).forEach(p => {
             p.role = null;
             p.isAlive = true;
+            p.seenRoles = {};
         });
 
         this.io.to(this.roomCode).emit('gameReset');

@@ -32,6 +32,14 @@ class GameLogic {
         this.arsonistIgniteUsed = false;
     }
 
+    isWolfAligned(player) {
+        return !!player && (WOLF_ROLES.includes(player.role) || player.isWolfAligned === true);
+    }
+
+    canWolfTeamRevealRole(viewer, target) {
+        return this.isWolfAligned(viewer) && this.isWolfAligned(target);
+    }
+
     addPlayer(socketId, name, isHost) {
         this.players[socketId] = {
             id: socketId,
@@ -39,8 +47,10 @@ class GameLogic {
             name: name,
             isHost: isHost,
             role: null,
+            isWolfAligned: false,
             isAlive: true,
-            seenRoles: {} // targetId -> roleName
+            seenRoles: {}, // targetId -> roleName
+            seenAuras: {} // targetId -> Good | Evil | Unknown
         };
         return this.players[socketId];
     }
@@ -61,13 +71,12 @@ class GameLogic {
 
     getPlayers(forSocketId) {
         const forPlayer = this.players[forSocketId];
-        const isWolf = forPlayer && ['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'].includes(forPlayer.role);
         
         return Object.values(this.players).map(p => {
             let reveal = false;
             if (p.id === forSocketId) reveal = true;
             if (this.state === 'GAME_OVER' || (!p.isAlive && this.revealRoleOnDeath)) reveal = true;
-            if (isWolf && ['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'].includes(p.role)) reveal = true;
+            if (this.canWolfTeamRevealRole(forPlayer, p)) reveal = true;
             
             return {
                 id: p.id,
@@ -75,7 +84,9 @@ class GameLogic {
                 name: p.name,
                 isHost: p.isHost,
                 isAlive: p.isAlive,
-                role: (reveal || (forPlayer && forPlayer.seenRoles && forPlayer.seenRoles[p.id])) ? p.role : null
+                role: (reveal || (forPlayer && forPlayer.seenRoles && forPlayer.seenRoles[p.id])) ? p.role : null,
+                isWolfAligned: this.isWolfAligned(p),
+                auraAlignment: (forPlayer && forPlayer.seenAuras && forPlayer.seenAuras[p.id]) ? forPlayer.seenAuras[p.id] : null
             };
         });
     }
@@ -147,6 +158,7 @@ class GameLogic {
 
         ids.forEach((id, index) => {
             this.players[id].role = roles[index];
+            this.players[id].isWolfAligned = WOLF_ROLES.includes(roles[index]);
         });
     }
 
@@ -165,7 +177,7 @@ class GameLogic {
         this.broadcastSystemMessage(`Đêm ${this.dayNumber} buông xuống. Mọi người đi ngủ.`);
 
         // Inform wolves of each other
-        const werewolves = Object.values(this.players).filter(p => WOLF_ROLES.includes(p.role) && p.isAlive);
+        const werewolves = Object.values(this.players).filter(p => this.isWolfAligned(p) && p.isAlive);
         const werewolfNames = werewolves.map(w => w.name).join(', ');
         
         if (werewolves.length === 1 && werewolves[0].role === 'WOLF_SEER') {
@@ -184,7 +196,7 @@ class GameLogic {
         // Kích hoạt tất cả role có khả năng hành động ban đêm
         const activeRoles = ['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF', 'AURA_SEER', 'DOCTOR', 'WITCH', 'ARSONIST'];
         Object.values(this.players).forEach(p => {
-            if (p.isAlive && activeRoles.includes(p.role) && p.id !== this.sleptThisNightId) {
+            if (p.isAlive && (activeRoles.includes(p.role) || this.isWolfAligned(p)) && p.id !== this.sleptThisNightId) {
                 this.io.to(p.id).emit('yourTurn', { role: p.role, timeLeft: 30 });
             }
         });
@@ -215,7 +227,7 @@ class GameLogic {
 
 
     broadcastWerewolfVotes() {
-        const werewolves = Object.values(this.players).filter(p => WOLF_ROLES.includes(p.role) && p.isAlive);
+        const werewolves = Object.values(this.players).filter(p => this.isWolfAligned(p) && p.isAlive);
         const voteInfo = Object.entries(this.werewolfVotes).map(([voterId, targetId]) => ({
             voterId,
             voterName: this.players[voterId]?.name,
@@ -248,9 +260,13 @@ class GameLogic {
                 return;
             }
 
-            if (actionType === 'WEREWOLF_KILL' && WOLF_ROLES.includes(player.role)) {
+            if (actionType === 'WEREWOLF_KILL' && this.isWolfAligned(player)) {
                 if (player.role === 'WOLF_SEER' && !this.wolfSeerResigned) {
                     this.io.to(socketId).emit('error', 'Sói Tiên Tri phải từ bỏ quyền Soi mới được cắn người.');
+                    return;
+                }
+                if (!this.players[targetId] || this.isWolfAligned(this.players[targetId])) {
+                    this.io.to(socketId).emit('error', 'Không thể cắn một thành viên cùng phe sói.');
                     return;
                 }
                 if (this.werewolfVotes[socketId] === targetId) {
@@ -263,8 +279,11 @@ class GameLogic {
                 const targetRole = this.players[targetId].role;
                 let alignment = 'Unknown';
                 if (GOOD_ROLES.includes(targetRole)) alignment = 'Good (Dân Làng)';
-                else if (EVIL_ROLES.includes(targetRole)) alignment = 'Evil (Ma Sói)';
+                else if (this.isWolfAligned(this.players[targetId]) || EVIL_ROLES.includes(targetRole)) alignment = 'Evil (Ma Sói)';
+                if (!player.seenAuras) player.seenAuras = {};
+                player.seenAuras[targetId] = alignment;
                 this.io.to(socketId).emit('systemMessage', `Bạn soi và thấy ${this.players[targetId].name} thuộc phe: ${alignment}.`);
+                this.updateClientState();
             } else if (actionType === 'WOLF_SEER_CHECK' && player.role === 'WOLF_SEER') {
                 if (this.wolfSeerResigned) {
                     this.io.to(socketId).emit('error', 'Bạn đã từ bỏ quyền Soi!');
@@ -279,6 +298,10 @@ class GameLogic {
                 this.wolfSeerResigned = true;
                 this.io.to(socketId).emit('systemMessage', 'Đã từ bỏ quyền Soi. Giờ bạn có thể cắn người!');
             } else if (actionType === 'CURSED_WOLF_TURN' && player.role === 'CURSED_WOLF' && !this.cursedWolfUsed) {
+                if (!this.players[targetId] || this.isWolfAligned(this.players[targetId])) {
+                    this.io.to(socketId).emit('error', 'Không thể nguyền rủa một thành viên cùng phe sói.');
+                    return;
+                }
                 if (this.cursedWolfTarget === targetId) {
                     this.cursedWolfTarget = null;
                     this.nightActions = this.nightActions.filter(a => a.type !== 'CURSED_WOLF_TURN');
@@ -351,7 +374,7 @@ class GameLogic {
             if (!this.priestUsed) {
                 this.priestUsed = true;
                 const targetRole = this.players[targetId].role;
-                if (WOLF_ROLES.includes(targetRole)) {
+                if (this.isWolfAligned(this.players[targetId])) {
                     this.players[targetId].isAlive = false;
                     this.broadcastSystemMessage(`Priest ${player.name} đã tạt nước thánh tiêu diệt sói ${this.players[targetId].name}!`);
                 } else {
@@ -453,9 +476,9 @@ class GameLogic {
 
         if (!this.checkWinCondition()) {
             if (turnedPlayerId && this.players[turnedPlayerId] && this.players[turnedPlayerId].isAlive && !deaths.has(turnedPlayerId)) {
-                this.players[turnedPlayerId].role = 'WEREWOLF';
-                this.io.to(turnedPlayerId).emit('systemMessage', 'Bạn đã bị Sói Nguyền cắn! Kể từ sáng nay, bạn đã trở thành Ma Sói.');
-                this.io.to(turnedPlayerId).emit('roleAssigned', 'WEREWOLF');
+                this.players[turnedPlayerId].isWolfAligned = true;
+                this.io.to(turnedPlayerId).emit('systemMessage', 'Bạn đã bị nguyền rủa. Từ sáng nay bạn theo phe Ma Sói.');
+                this.io.to(turnedPlayerId).emit('systemMessage', 'Bạn vẫn giữ vai trò góc và kỹ năng cũ, chỉ đổi sang phe Ma Sói.');
             }
             this.startDay();
         }
@@ -474,9 +497,27 @@ class GameLogic {
             
             if (timeLeft <= 0) {
                 clearInterval(this.timer);
-                this.startVote();
+                if (!this.checkDiscussionEndWinCondition()) {
+                    this.startVote();
+                }
             }
         }, 1000);
+    }
+
+    checkDiscussionEndWinCondition() {
+        const alivePlayers = Object.values(this.players).filter(p => p.isAlive);
+        const wolves = alivePlayers.filter(p => this.isWolfAligned(p));
+        const thirdParty = alivePlayers.filter(p => !this.isWolfAligned(p) && (p.role === 'ARSONIST' || p.role === 'FOOL'));
+
+        if (thirdParty.length > 0 && wolves.length >= thirdParty.length) {
+            this.state = 'GAME_OVER';
+            this.updateClientState();
+            this.broadcastSystemMessage('Kết thúc thảo luận: phe Sói đã áp đảo phe thứ 3. Ma Sói thắng!');
+            this.revealAllRoles('WEREWOLF');
+            return true;
+        }
+
+        return false;
     }
 
     startVote() {
@@ -569,9 +610,9 @@ class GameLogic {
         const alivePlayers = Object.values(this.players).filter(p => p.isAlive);
         if (alivePlayers.length === 0) return false;
 
-        const wolves = alivePlayers.filter(p => WOLF_ROLES.includes(p.role));
+        const wolves = alivePlayers.filter(p => this.isWolfAligned(p));
         const arsonists = alivePlayers.filter(p => p.role === 'ARSONIST');
-        const villagers = alivePlayers.filter(p => !WOLF_ROLES.includes(p.role) && p.role !== 'FOOL' && p.role !== 'ARSONIST');
+        const villagers = alivePlayers.filter(p => !this.isWolfAligned(p) && p.role !== 'FOOL' && p.role !== 'ARSONIST');
         
         const nonWolves = alivePlayers.length - wolves.length;
         
@@ -638,8 +679,10 @@ class GameLogic {
 
         Object.values(this.players).forEach(p => {
             p.role = null;
+            p.isWolfAligned = false;
             p.isAlive = true;
             p.seenRoles = {};
+            p.seenAuras = {};
         });
 
         this.io.to(this.roomCode).emit('gameReset');
@@ -666,10 +709,10 @@ class GameLogic {
             }
         } else if (this.state === 'NIGHT') {
             // If night, only werewolves can chat (in werewolf channel)
-            if (WOLF_ROLES.includes(player.role)) {
+            if (this.isWolfAligned(player)) {
                 chatMsg.isWerewolfChannel = true;
                 for (const id in this.players) {
-                    if (WOLF_ROLES.includes(this.players[id].role) && this.players[id].isAlive) {
+                    if (this.isWolfAligned(this.players[id]) && this.players[id].isAlive) {
                         this.io.to(id).emit('chatMessage', chatMsg);
                     }
                 }
@@ -698,7 +741,11 @@ class GameLogic {
                     witchHealPotion: this.witchHealPotion,
                     witchPoisonPotion: this.witchPoisonPotion,
                     doctorLastHealed: this.doctorLastHealed,
-                    arsonistDoused: this.players[socketId].role === 'ARSONIST' ? this.arsonistDoused : []
+                    canWerewolfKill: this.isWolfAligned(this.players[socketId]),
+                    cursedWolfUsed: this.cursedWolfUsed,
+                    arsonistDoused: this.players[socketId].role === 'ARSONIST' ? this.arsonistDoused : [],
+                    cursedWolfTarget: this.players[socketId].role === 'CURSED_WOLF' ? this.cursedWolfTarget : null,
+                    currentWerewolfVote: this.werewolfVotes ? (this.werewolfVotes[socketId] || null) : null
                 }
             };
             this.io.to(socketId).emit('gameStateUpdate', stateForPlayer);

@@ -71,6 +71,7 @@ const generalChat = document.getElementById('general-chat');
 const werewolfChat = document.getElementById('werewolf-chat');
 const ghostChat = document.getElementById('ghost-chat');
 const tabBtns = document.querySelectorAll('.tab-btn');
+const wolfRoles = ['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'];
 
 // DOM Elements - Action Modal
 const actionModal = document.getElementById('action-modal');
@@ -339,7 +340,60 @@ function showNotification(msg) {
     }, 4000);
 }
 
+function isWolfTeamMember(player) {
+    return !!player && (wolfRoles.includes(player.role) || player.isWolfAligned === true);
+}
+
+function hasConvertedWolfActions(player) {
+    return !!player && player.isWolfAligned === true && !wolfRoles.includes(player.role);
+}
+
+function shouldKeepNightActionOpen() {
+    return hasConvertedWolfActions(myPlayerInfo);
+}
+
+function canUseWerewolfKill() {
+    return !!myPlayerInfo && myPlayerInfo.canWerewolfKill === true;
+}
+
+function closeActionModal() {
+    actionModal.classList.add('hidden');
+    actionTargets.innerHTML = '';
+    btnConfirmAction.classList.remove('hidden');
+    btnCancelAction.textContent = 'Hủy';
+    pendingActionType = null;
+    actionTargetId = null;
+}
+
+function openChoiceModal(title, description, choices) {
+    actionTitle.textContent = title;
+    actionDescription.textContent = description;
+    actionTargets.innerHTML = '';
+    btnConfirmAction.classList.add('hidden');
+    btnCancelAction.textContent = 'Đóng';
+
+    choices.forEach(choice => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `target-btn${choice.danger ? ' selected' : ''}`;
+        btn.textContent = choice.label;
+        btn.addEventListener('click', () => {
+            closeActionModal();
+            if (choice.onClick) choice.onClick();
+        });
+        actionTargets.appendChild(btn);
+    });
+
+    actionModal.classList.remove('hidden');
+}
+
+function isNearBottom(container, threshold = 48) {
+    const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return remaining <= threshold;
+}
+
 function appendChatMessage(container, data) {
+    const shouldStickToBottom = isNearBottom(container);
     const msgDiv = document.createElement('div');
     msgDiv.className = 'chat-msg';
     if (data.isSystem) msgDiv.classList.add('system');
@@ -368,7 +422,9 @@ function appendChatMessage(container, data) {
     }
 
     container.appendChild(msgDiv);
-    container.scrollTop = container.scrollHeight;
+    if (shouldStickToBottom) {
+        container.scrollTop = container.scrollHeight;
+    }
 }
 
 // Event Listeners - UI
@@ -512,9 +568,7 @@ tabBtns.forEach(btn => {
 });
 
 btnCancelAction.addEventListener('click', () => {
-    actionModal.classList.add('hidden');
-    actionTargetId = null;
-    pendingActionType = null;
+    closeActionModal();
 });
 
 btnConfirmAction.addEventListener('click', () => {
@@ -523,7 +577,7 @@ btnConfirmAction.addEventListener('click', () => {
             roomCode: currentRoomCode,
             actionType: pendingActionType
         });
-        actionModal.classList.add('hidden');
+        closeActionModal();
         showNotification('Hành động đã được xác nhận.');
         return;
     }
@@ -534,7 +588,7 @@ btnConfirmAction.addEventListener('click', () => {
             actionType: pendingActionType,
             targetId: actionTargetId
         });
-        actionModal.classList.add('hidden');
+        closeActionModal();
         showNotification('Hành động đã được xác nhận.');
     }
 });
@@ -595,7 +649,7 @@ socket.on('updatePlayers', (players) => {
     // Update waiting room
     waitingPlayersList.innerHTML = '';
     playerCountDisplay.textContent = players.length;
-    players.forEach(p => {
+    players.forEach((p, idx) => {
         const li = document.createElement('li');
         li.className = 'waiting-player-item';
 
@@ -605,7 +659,7 @@ socket.on('updatePlayers', (players) => {
         img.className = 'player-avatar-small';
 
         const span = document.createElement('span');
-        span.textContent = p.playerIndex + '. ' + p.name + (p.isHost ? ' 👑' : '');
+        span.textContent = `${idx + 1}. ${p.name}${p.isHost ? ' 👑' : ''}`;
 
         li.appendChild(img);
         li.appendChild(span);
@@ -645,6 +699,7 @@ socket.on('gameStateUpdate', (gameState) => {
     currentGameState = gameState;
     if (gameState.player) {
         myPlayerInfo = gameState.player;
+        if (myPlayerInfo.role) setRoleDisplay(myPlayerInfo.role);
     }
 
     if (gameState.state !== 'NIGHT') {
@@ -672,7 +727,7 @@ socket.on('gameStateUpdate', (gameState) => {
         phaseIndicator.textContent = `Đêm ${gameState.dayNumber}`;
         document.body.className = 'phase-night';
         // Hide/Show werewolf chat tab
-        if (myPlayerInfo && ['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'].includes(myPlayerInfo.role)) {
+        if (isWolfTeamMember(myPlayerInfo)) {
             document.getElementById('werewolf-tab').classList.remove('hidden');
         }
     } else if (gameState.state === 'DAY') {
@@ -707,18 +762,39 @@ const roleTranslations = {
 };
 
 const roleDescriptions = {
-    'WEREWOLF': 'Phe Ma Sói. Mỗi đêm, cả bầy sói sẽ cùng thống nhất chọn một người để tiêu diệt. Mục tiêu của bạn là tiêu diệt hết Dân Làng hoặc Phe thứ 3 để chiếm lấy ngôi làng.',
-    'AURA_SEER': 'Phe Dân Làng. Mỗi đêm, bạn có thể soi hào quang của một người chơi để biết họ thuộc phe Tốt (Dân làng), Xấu (Ma sói) hay Không xác định (Kẻ phóng hỏa, Kẻ ngốc...).',
-    'DOCTOR': 'Phe Dân Làng. Mỗi đêm, bạn chọn một người để bảo vệ khỏi sự tấn công của Ma Sói. Lưu ý: Bạn không thể bảo vệ cùng một người trong 2 đêm liên tiếp.',
-    'WITCH': 'Phe Dân Làng. Bạn sở hữu 2 lọ thuốc quyền năng: 1 lọ Thuốc Hồi Sinh để cứu người bị sói cắn và 1 lọ Thuốc Độc để tiêu diệt một người. Mỗi lọ chỉ được dùng 1 lần duy nhất.',
-    'FOOL': 'Phe Thứ 3. Mục tiêu duy nhất của bạn là làm mọi cách để Dân Làng nghi ngờ và bỏ phiếu treo cổ bạn vào ban ngày. Nếu bị treo cổ, bạn sẽ thắng cuộc ngay lập tức.',
-    'VILLAGER': 'Phe Dân Làng. Bạn không có kỹ năng đặc biệt ban đêm, nhưng sức mạnh của bạn nằm ở lá phiếu vào ban ngày. Hãy cùng mọi người tìm ra kẻ giả mạo và treo cổ chúng.',
-    'NIGHTMARE_WEREWOLF': 'Phe Ma Sói. Bạn có khả năng ru ngủ một người chơi vào ban ngày (tối đa 2 lần). Người bị ru ngủ sẽ không thể thực hiện kỹ năng của mình vào đêm hôm sau.',
-    'WOLF_SEER': 'Phe Ma Sói. Mỗi đêm, bạn có thể soi chính xác vai trò của một người chơi. Lưu ý: Bạn phải từ bỏ quyền soi (nhấn vào tên mình) thì mới có thể tham gia đi cắn người cùng bầy sói.',
-    'CURSED_WOLF': 'Phe Ma Sói. Mỗi ván đấu một lần, bạn có thể chọn nguyền rủa một người. Người bị nguyền rủa sẽ biến đổi thành Sói vào sáng hôm sau.',
-    'ARSONIST': 'Phe Thứ 3. Mỗi đêm bạn có thể chọn tưới xăng lên 2 người. Bạn có DUY NHẤT 1 mồi lửa để châm ngòi. Khi châm lửa, tất cả những người đã bị tưới xăng từ trước sẽ bị thiêu rụi.',
-    'PRIEST': 'Phe Dân Làng. Một lần vào ban ngày, bạn có thể tạt nước thánh vào một người. Nếu đó là Sói, nó sẽ chết. Nếu là người tốt, chính bạn sẽ bị trừng phạt và chết ngay lập tức.'
-};
+    'WEREWOLF': 
+      'Phe Ma Sói. Mỗi đêm, bạn cùng bầy sói chọn 1 người để cắn. Mục tiêu của phe Sói là tiêu diệt hết Dân Làng và các phe đối địch.',
+  
+    'AURA_SEER': 
+      'Phe Dân Làng. Mỗi đêm, bạn chọn 1 người để soi hào quang, biết người đó thuộc nhóm Tốt, Xấu hoặc Không xác định.',
+  
+    'DOCTOR': 
+      'Phe Dân Làng. Mỗi đêm, bạn chọn 1 người để bảo vệ khỏi Ma Sói. Không thể bảo vệ cùng một người trong 2 đêm liên tiếp.',
+  
+    'WITCH': 
+      'Phe Dân Làng. Bạn có 2 bình thuốc: 1 bình cứu người bị Sói cắn và 1 bình độc để giết 1 người. Mỗi bình chỉ dùng được 1 lần.',
+  
+    'FOOL': 
+      'Phe Thứ 3. Bạn thắng nếu bị Dân Làng treo cổ vào ban ngày. Hãy khiến mọi người nghi ngờ bạn, nhưng đừng để bị giết vào ban đêm.',
+  
+    'VILLAGER': 
+      'Phe Dân Làng. Bạn không có kỹ năng ban đêm. Hãy quan sát, suy luận và dùng lá phiếu ban ngày để tìm ra Ma Sói.',
+  
+    'NIGHTMARE_WEREWOLF': 
+      'Phe Ma Sói. Ban ngày, bạn có thể ru ngủ 1 người, khiến họ không thể dùng kỹ năng vào đêm kế tiếp. Kỹ năng này dùng tối đa 2 lần.',
+  
+    'WOLF_SEER': 
+      'Phe Ma Sói. Mỗi đêm, bạn có thể soi chính xác vai trò của 1 người. Nếu muốn tham gia cắn cùng bầy Sói, bạn phải bỏ lượt soi.',
+  
+    'CURSED_WOLF': 
+      'Phe Ma Sói. Một lần mỗi ván, bạn có thể nguyền rủa 1 người. Người đó sẽ biến thành Sói vào sáng hôm sau.',
+  
+    'ARSONIST': 
+      'Phe Thứ 3. Mỗi đêm, bạn có thể tưới xăng lên tối đa 2 người. Bạn có 1 lần châm lửa để thiêu toàn bộ những người đã bị tưới xăng.',
+  
+    'PRIEST': 
+      'Phe Dân Làng. Một lần vào ban ngày, bạn có thể tạt nước thánh vào 1 người. Nếu người đó là Sói, họ chết. Nếu không phải Sói, bạn chết.'
+  };
 
 function getRoleColor(role) {
     let roleColor = 'var(--text)';
@@ -735,11 +811,15 @@ function getRoleColor(role) {
 function setRoleDisplay(role) {
     const name = roleTranslations[role] || role;
     const desc = roleDescriptions[role] || '';
+    const alignmentNote = (myPlayerInfo && myPlayerInfo.isWolfAligned && !wolfRoles.includes(role))
+        ? '<div style="font-size:0.72rem; line-height:1.3; margin-top:8px; color:#fca5a5; font-weight:700;">Bạn đang theo phe Ma Sói nhưng vẫn giữ kỹ năng vai trò gốc.</div>'
+        : '';
     myRoleDisplay.innerHTML = `
         <div style="font-family: var(--font-display); font-size: 1.2rem; margin-bottom: 4px;">${name}</div>
         <div style="font-size: 0.7rem; line-height: 1.3; opacity: 0.9; font-weight: normal; font-style: italic; max-width: 250px;">
             ${desc}
         </div>
+        ${alignmentNote}
     `;
 
     let roleColor = getRoleColor(role);
@@ -808,8 +888,6 @@ socket.on('timerUpdate', (time) => {
 
 socket.on('systemMessage', (msg) => {
     appendChatMessage(generalChat, { isSystem: true, message: msg });
-
-    // Do NOT auto-reveal ghost chat when someone dies - player manually switches tab
 });
 
 socket.on('werewolfInfo', (names) => {
@@ -832,12 +910,12 @@ socket.on('yourTurn', ({ role }) => {
     // Show turn notification
     const rName = roleTranslations[role] || role;
     if (role === 'WITCH') {
-        showNotification(`⏱ Lượt của bạn (${rName})! Chọn mục tiêu, rồi chọn Thuốc ở bảng bên trái.`);
-        showWitchPanel();
+        showNotification(`⏱ Lượt của bạn (${rName})! Nhấn vào player để mở modal chọn thuốc.`);
+        if (typeof hideWitchPanel === 'function') hideWitchPanel();
         if (typeof hideCursedWolfPanel === 'function') hideCursedWolfPanel();
     } else if (role === 'CURSED_WOLF') {
-        showNotification(`⏱ Lượt của bạn (${rName})! Chọn mục tiêu, rồi chọn hành động ở bảng bên trái.`);
-        if (typeof showCursedWolfPanel === 'function') showCursedWolfPanel();
+        showNotification(`⏱ Lượt của bạn (${rName})! Nhấn vào player để mở modal vote hoặc nguyền.`);
+        if (typeof hideCursedWolfPanel === 'function') hideCursedWolfPanel();
         if (typeof hideWitchPanel === 'function') hideWitchPanel();
     } else {
         if (typeof hideWitchPanel === 'function') hideWitchPanel();
@@ -872,7 +950,6 @@ socket.on('slotTimerUpdate', (timeLeft) => { });
 
 socket.on('chatMessage', (data) => {
     let container = generalChat;
-    if (data.isGhost) container = ghostChat;
     if (data.isWerewolfChannel) container = werewolfChat;
 
     appendChatMessage(container, data);
@@ -1011,10 +1088,16 @@ function renderPlayersGrid(players) {
 
         // Name + role label
         const infoDiv = document.createElement('div');
-        let displayContent = `<strong style="font-size:0.8rem">${p.playerIndex}. ${p.name}</strong>`;
+        let displayContent = `<strong style="font-size:0.8rem">${idx + 1}. ${p.name}</strong>`;
         if (p.role) {
             const roleName = roleTranslations[p.role] || p.role;
             displayContent += `<br><span class="revealed-role" style="color:${getRoleColor(p.role)}">${roleName}</span>`;
+        }
+        if (p.auraAlignment) {
+            const auraColor = p.auraAlignment === 'Good (Dân Làng)' ? '#22c55e'
+                : p.auraAlignment === 'Evil (Ma Sói)' ? '#ef4444'
+                    : '#f59e0b';
+            displayContent += `<br><span class="revealed-role" style="color:${auraColor}; border-color:${auraColor};">${p.auraAlignment}</span>`;
         }
         infoDiv.innerHTML = displayContent;
 
@@ -1035,7 +1118,7 @@ function renderPlayersGrid(players) {
             }
         }
 
-        if (currentGameState && currentGameState.state === 'NIGHT' && myPlayerInfo && ['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'].includes(myPlayerInfo.role)) {
+        if (currentGameState && currentGameState.state === 'NIGHT' && isWolfTeamMember(myPlayerInfo)) {
             const wolves = currentWerewolfVotes.filter(v => v.targetId === p.id).map(v => v.voterName);
             if (wolves.length > 0) {
                 const badge = document.createElement('div');
@@ -1103,7 +1186,8 @@ function renderPlayersGrid(players) {
                 'ARSONIST_DOUSE': 'targeted-douse',
                 'ARSONIST_IGNITE': 'targeted-ignite',
                 'DOCTOR_HEAL': 'targeted-heal',
-                'WITCH_TARGET': 'targeted-see'
+                'WITCH_TARGET': 'targeted-see',
+                'CURSED_WOLF_TURN': 'targeted-see'
             };
 
             if (p.id === socket.id) {
@@ -1117,17 +1201,24 @@ function renderPlayersGrid(players) {
                     div.title = "Nhấn để CHÂM LỬA (Tiêu diệt tất cả người bị douse)";
                 }
             } else {
+                if (canUseWerewolfKill() && !isWolfTeamMember(p)) {
+                    canTarget = true;
+                    actionType = 'WEREWOLF_KILL';
+                    div.title = "Nhấn để vote cắn người này";
+                    if (currentWerewolfVotes.find(v => v.voterId === socket.id && v.targetId === p.id)) div.classList.add(targetClass[actionType]);
+                }
+
                 if (role === 'CURSED_WOLF' && nightActionMode === 'CURSED_WOLF') {
-                    if (!['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'].includes(p.role)) {
+                    if (!isWolfTeamMember(p)) {
                         canTarget = true; actionType = 'CURSED_WOLF_TARGET';
                         div.title = "Nhấn chọn làm mục tiêu";
-                        if (p.id === actionTargetId) div.classList.add('targeted-see');
+                        if (myPlayerInfo.cursedWolfTarget === p.id) div.classList.add('targeted-see');
                     }
-                } else if (['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'CURSED_WOLF'].includes(role) && !['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'].includes(p.role)) {
+                } else if (['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'CURSED_WOLF'].includes(role) && !isWolfTeamMember(p)) {
                     canTarget = true; actionType = 'WEREWOLF_KILL';
                     div.title = "Nhấn để cắn người này";
-                    if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
-                } else if (role === 'WOLF_SEER' && !['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'].includes(p.role)) {
+                    if (currentWerewolfVotes.find(v => v.voterId === socket.id && v.targetId === p.id)) div.classList.add(targetClass[actionType]);
+                } else if (role === 'WOLF_SEER' && !isWolfTeamMember(p)) {
                     canTarget = true; actionType = window.wolfSeerResigned ? 'WEREWOLF_KILL' : 'WOLF_SEER_CHECK';
                     div.title = window.wolfSeerResigned ? "Nhấn để cắn người này" : "Nhấn để Soi vai trò người này";
                     if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
@@ -1169,13 +1260,37 @@ function renderPlayersGrid(players) {
                     }
                     if (actionType === 'ARSONIST_IGNITE') {
                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
-                        nightActionMode = null;
+                        if (!shouldKeepNightActionOpen()) nightActionMode = null;
                         showNotification('Bạn đã châm lửa!');
                         renderPlayersGrid(currentGameState.players);
                         return;
                     }
 
                     if (actionType === 'ARSONIST_DOUSE') {
+                        if (hasConvertedWolfActions(myPlayerInfo) && !isWolfTeamMember(p)) {
+                            const hasKillVote = !!currentWerewolfVotes.find(v => v.voterId === socket.id && v.targetId === p.id);
+                            openChoiceModal('Hành động ban đêm', `Chọn hành động với ${p.name}.`, [
+                                {
+                                    label: 'Tưới xăng',
+                                    onClick: () => {
+                                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'ARSONIST_DOUSE', targetId: p.id });
+                                        showNotification(`Đã chọn tưới xăng ${p.name}.`);
+                                        renderPlayersGrid(currentGameState.players);
+                                    }
+                                },
+                                {
+                                    label: hasKillVote ? 'Bỏ vote giết' : 'Vote giết',
+                                    danger: true,
+                                    onClick: () => {
+                                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WEREWOLF_KILL', targetId: p.id });
+                                        showNotification(hasKillVote ? `Đã bỏ vote giết ${p.name}.` : `Đã vote giết ${p.name}.`);
+                                        renderPlayersGrid(currentGameState.players);
+                                    }
+                                },
+                                { label: 'Đóng' }
+                            ]);
+                            return;
+                        }
                         if (!window.arsoTargets) window.arsoTargets = [];
                         if (window.arsoTargets.includes(p.id)) {
                             window.arsoTargets = window.arsoTargets.filter(t => t !== p.id);
@@ -1186,6 +1301,149 @@ function renderPlayersGrid(players) {
                             div.classList.add(targetClass['ARSONIST_DOUSE']);
                         }
                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
+                        return;
+                    }
+
+                    if (hasConvertedWolfActions(myPlayerInfo) && !isWolfTeamMember(p) && actionType !== 'CURSED_WOLF_TARGET') {
+                        const hasKillVote = !!currentWerewolfVotes.find(v => v.voterId === socket.id && v.targetId === p.id);
+                        const roleChoices = [];
+
+                        if (actionType === 'AURA_SEER_CHECK') {
+                            roleChoices.push({
+                                label: 'Soi phe',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AURA_SEER_CHECK', targetId: p.id });
+                                    showNotification(`Đang soi phe ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        } else if (actionType === 'DOCTOR_HEAL') {
+                            roleChoices.push({
+                                label: 'Bảo vệ',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'DOCTOR_HEAL', targetId: p.id });
+                                    showNotification(`Đã chọn bảo vệ ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        } else if (actionType === 'WITCH_TARGET') {
+                            if (myPlayerInfo.witchHealPotion) {
+                                roleChoices.push({
+                                    label: 'Dùng Bình Máu',
+                                    onClick: () => {
+                                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WITCH_HEAL', targetId: p.id });
+                                        showNotification(`Đã dùng Bình Máu lên ${p.name}.`);
+                                        renderPlayersGrid(currentGameState.players);
+                                    }
+                                });
+                            }
+                            if (myPlayerInfo.witchPoisonPotion) {
+                                roleChoices.push({
+                                    label: 'Dùng Bình Độc',
+                                    danger: true,
+                                    onClick: () => {
+                                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WITCH_POISON', targetId: p.id });
+                                        showNotification(`Đã dùng Bình Độc lên ${p.name}.`);
+                                        renderPlayersGrid(currentGameState.players);
+                                    }
+                                });
+                            }
+                        } else if (actionType === 'ARSONIST_DOUSE') {
+                            roleChoices.push({
+                                label: 'Tưới xăng',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'ARSONIST_DOUSE', targetId: p.id });
+                                    showNotification(`Đã chọn tưới xăng ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        }
+
+                        roleChoices.push({
+                            label: hasKillVote ? 'Bỏ vote giết' : 'Vote giết',
+                            danger: true,
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WEREWOLF_KILL', targetId: p.id });
+                                showNotification(hasKillVote ? `Đã bỏ vote giết ${p.name}.` : `Đã vote giết ${p.name}.`);
+                                renderPlayersGrid(currentGameState.players);
+                            }
+                        });
+
+                        roleChoices.push({ label: 'Đóng' });
+                        openChoiceModal('Hành động ban đêm', `Chọn hành động với ${p.name}.`, roleChoices);
+                        return;
+                    }
+
+                    if (actionType === 'CURSED_WOLF_TARGET') {
+                        const hasKillVote = !!currentWerewolfVotes.find(v => v.voterId === socket.id && v.targetId === p.id);
+                        const hasCurseVote = myPlayerInfo && myPlayerInfo.cursedWolfTarget === p.id;
+                        const choices = [];
+
+                        choices.push({
+                            label: hasKillVote ? 'Bỏ vote giết' : 'Vote giết',
+                            danger: true,
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WEREWOLF_KILL', targetId: p.id });
+                                showNotification(hasKillVote ? `Đã bỏ vote giết ${p.name}.` : `Đã vote giết ${p.name}.`);
+                            }
+                        });
+
+                        if (!myPlayerInfo.cursedWolfUsed || hasCurseVote) {
+                            choices.push({
+                                label: hasCurseVote ? 'Bỏ nguyền' : 'Nguyền',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'CURSED_WOLF_TURN', targetId: p.id });
+                                    myPlayerInfo.cursedWolfTarget = hasCurseVote ? null : p.id;
+                                    showNotification(hasCurseVote ? `Đã bỏ nguyền ${p.name}.` : `Đã chọn nguyền ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        }
+
+                        choices.push({ label: 'Bỏ qua' });
+                        openChoiceModal('Sói Nguyền', `Chọn hành động với ${p.name}.`, choices);
+                        return;
+                    }
+
+                    if (actionType === 'WITCH_TARGET') {
+                        const choices = [];
+
+                        if (myPlayerInfo.witchHealPotion) {
+                            choices.push({
+                                label: 'Dùng Bình Máu',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WITCH_HEAL', targetId: p.id });
+                                    nightActionMode = null;
+                                    showNotification(`Đã dùng Bình Máu lên ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        }
+
+                        if (myPlayerInfo.witchPoisonPotion) {
+                            choices.push({
+                                label: 'Dùng Bình Độc',
+                                danger: true,
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WITCH_POISON', targetId: p.id });
+                                    nightActionMode = null;
+                                    showNotification(`Đã dùng Bình Độc lên ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        }
+
+                        choices.push({
+                            label: 'Bỏ qua',
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WITCH_NONE' });
+                                nightActionMode = null;
+                                showNotification('Đã bỏ qua lượt của Phù Thủy.');
+                                renderPlayersGrid(currentGameState.players);
+                            }
+                        });
+
+                        openChoiceModal('Phù Thủy', `Chọn loại thuốc dùng lên ${p.name}.`, choices);
                         return;
                     }
 
@@ -1205,12 +1463,12 @@ function renderPlayersGrid(players) {
                             socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
                         } else if (actionType === 'AURA_SEER_CHECK' || actionType === 'WOLF_SEER_CHECK') {
                             socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
-                            nightActionMode = null;
+                            if (!shouldKeepNightActionOpen()) nightActionMode = null;
                             showNotification(`Đang soi xét ${p.name}...`);
                             renderPlayersGrid(currentGameState.players);
                         } else if (actionType === 'DOCTOR_HEAL') {
                             socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
-                            nightActionMode = null;
+                            if (!shouldKeepNightActionOpen()) nightActionMode = null;
                             showNotification(`Đã bảo vệ ${p.name} đêm nay.`);
                             renderPlayersGrid(currentGameState.players);
                         } else if (actionType === 'WITCH_TARGET' || actionType === 'CURSED_WOLF_TARGET') {
@@ -1227,7 +1485,7 @@ function renderPlayersGrid(players) {
             let canTarget = false;
             let actionType = null;
 
-            if (myPlayerInfo.role === 'NIGHTMARE_WEREWOLF' && !['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'].includes(p.role)) {
+            if (myPlayerInfo.role === 'NIGHTMARE_WEREWOLF' && !isWolfTeamMember(p)) {
                 canTarget = true; actionType = 'NIGHTMARE_SLEEP';
             } else if (myPlayerInfo.role === 'PRIEST') {
                 canTarget = true; actionType = 'PRIEST_WATER';
@@ -1396,6 +1654,7 @@ function triggerDayActionModal(targetPlayer) {
     actionModal.classList.remove('hidden');
 }
 btnConfirmAction.addEventListener('click', () => {
+    return;
     if (pendingActionType && actionTargetId) {
         socket.emit('playerAction', {
             roomCode: currentRoomCode,
@@ -1412,6 +1671,7 @@ btnConfirmAction.addEventListener('click', () => {
 });
 
 btnCancelAction.addEventListener('click', () => {
+    return;
     actionModal.classList.add('hidden');
     pendingActionType = null;
     actionTargetId = null;

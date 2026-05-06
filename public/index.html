@@ -294,6 +294,20 @@
                         ⚔️ Bắt Đầu Trận
                     </button>
                 </div>
+
+                <div class="lobby-chat-panel chat-section" aria-label="Trò chuyện sảnh chờ">
+                    <div class="panel-header">
+                        <h3>💬 Trò Chuyện</h3>
+                    </div>
+                    <div class="chat-container lobby-chat-container">
+                        <div id="waiting-chat" class="chat-box" aria-label="Chat sảnh chờ"></div>
+                    </div>
+                    <div class="chat-input-area">
+                        <input type="text" id="waiting-chat-input" placeholder="Nhập tin nhắn cho cả phòng..." autocomplete="off"
+                            aria-label="Ô nhập chat sảnh chờ" maxlength="200">
+                        <button id="btn-send-waiting-chat" class="btn primary btn-send">Gửi</button>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -411,6 +425,7 @@
     </div><!-- /.container -->
 
     <script src="/socket.io/socket.io.js"></script>
+    <script src="/shared/roleRegistry.js"></script>
     <script src="app.js"></script>
 </body>
 

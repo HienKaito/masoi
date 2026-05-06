@@ -67,11 +67,17 @@ const gamePlayersGrid = document.getElementById('game-players-grid');
 // DOM Elements - Chat
 const chatInput = document.getElementById('chat-input');
 const btnSendChat = document.getElementById('btn-send-chat');
+const waitingChatInput = document.getElementById('waiting-chat-input');
+const btnSendWaitingChat = document.getElementById('btn-send-waiting-chat');
+const waitingChat = document.getElementById('waiting-chat');
 const generalChat = document.getElementById('general-chat');
 const werewolfChat = document.getElementById('werewolf-chat');
 const ghostChat = document.getElementById('ghost-chat');
 const tabBtns = document.querySelectorAll('.tab-btn');
-const wolfRoles = ['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'];
+const roleRegistry = window.WerewolfRoles;
+const roleDefinitions = roleRegistry.list();
+const roleSettingsKeys = roleRegistry.settingKeys();
+const wolfRoles = roleRegistry.wolfRoleIds;
 
 // DOM Elements - Action Modal
 const actionModal = document.getElementById('action-modal');
@@ -91,8 +97,8 @@ const audioManager = {
     currentTrack: null,
     isMuted: false,
     volumes: {
-        lobby: 0.1,
-        day: 0.3,
+        lobby: 0.05,
+        day: 0.2,
         night: 0.8
     },
     trackFiles: {
@@ -392,11 +398,67 @@ function isNearBottom(container, threshold = 48) {
     return remaining <= threshold;
 }
 
+function inferSystemMessageTheme(message) {
+    const normalized = (message || '').toLowerCase();
+
+    if (
+        normalized.includes('đã chết') ||
+        normalized.includes('chết trong đêm') ||
+        normalized.includes('treo cổ') ||
+        normalized.includes('bị giết') ||
+        normalized.includes('châm lửa')
+    ) {
+        return 'danger';
+    }
+
+    if (normalized.includes('thắng') || normalized.includes('chiến thắng')) {
+        return 'victory';
+    }
+
+    if (
+        normalized.includes('bầy sói') ||
+        normalized.includes('soi') ||
+        normalized.includes('thuộc phe') ||
+        normalized.includes('vai trò') ||
+        normalized.includes('nguyền rủa') ||
+        normalized.includes('tưới xăng')
+    ) {
+        return 'mystic';
+    }
+
+    if (
+        normalized.includes('ban đêm') ||
+        normalized.includes('đêm nay') ||
+        normalized.includes('sáng nay') ||
+        normalized.includes('lượt của bạn') ||
+        normalized.includes('không thể nói chuyện')
+    ) {
+        return 'phase';
+    }
+
+    if (
+        normalized.includes('đã chọn') ||
+        normalized.includes('đã dùng') ||
+        normalized.includes('đã bảo vệ') ||
+        normalized.includes('đã ru ngủ') ||
+        normalized.includes('đã từ bỏ') ||
+        normalized.includes('có quyền cắn') ||
+        normalized.includes('không thể cứu')
+    ) {
+        return 'action';
+    }
+
+    return 'system';
+}
+
 function appendChatMessage(container, data) {
     const shouldStickToBottom = isNearBottom(container);
     const msgDiv = document.createElement('div');
     msgDiv.className = 'chat-msg';
-    if (data.isSystem) msgDiv.classList.add('system');
+    if (data.isSystem) {
+        const systemTheme = data.systemTheme || inferSystemMessageTheme(data.message);
+        msgDiv.classList.add('system', `system-${systemTheme}`);
+    }
     if (data.isWerewolfChannel) msgDiv.classList.add('werewolf');
     if (data.isGhost) msgDiv.classList.add('ghost');
 
@@ -427,6 +489,15 @@ function appendChatMessage(container, data) {
     }
 }
 
+function sendRoomChatMessage(inputEl) {
+    if (!inputEl) return;
+    const msg = inputEl.value.trim();
+    if (msg && currentRoomCode) {
+        socket.emit('sendMessage', { roomCode: currentRoomCode, message: msg });
+        inputEl.value = '';
+    }
+}
+
 // Event Listeners - UI
 btnEnter.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
@@ -454,21 +525,15 @@ btnJoinRoom.addEventListener('click', () => {
 });
 
 function getSettings() {
+    const roles = Object.fromEntries(roleSettingsKeys.map(key => {
+        const inputId = `count-${key.replace(/_/g, '-')}`;
+        const input = document.getElementById(inputId);
+        return [key, input ? (parseInt(input.value, 10) || 0) : 0];
+    }));
+
     return {
         revealRoleOnDeath: document.getElementById('reveal-on-death').checked,
-        roles: {
-            villager: parseInt(document.getElementById('count-villager').value, 10) || 0,
-            aura_seer: parseInt(document.getElementById('count-aura-seer').value, 10) || 0,
-            doctor: parseInt(document.getElementById('count-doctor').value, 10) || 0,
-            witch: parseInt(document.getElementById('count-witch').value, 10) || 0,
-            priest: parseInt(document.getElementById('count-priest').value, 10) || 0,
-            werewolf: parseInt(document.getElementById('count-werewolf').value, 10) || 0,
-            nightmare_werewolf: parseInt(document.getElementById('count-nightmare-werewolf').value, 10) || 0,
-            wolf_seer: parseInt(document.getElementById('count-wolf-seer').value, 10) || 0,
-            cursed_wolf: parseInt(document.getElementById('count-cursed-wolf').value, 10) || 0,
-            arsonist: parseInt(document.getElementById('count-arsonist').value, 10) || 0,
-            fool: parseInt(document.getElementById('count-fool').value, 10) || 0
-        }
+        roles
     };
 }
 
@@ -484,9 +549,8 @@ function broadcastSettings() {
 }
 
 const settingElements = [
-    'reveal-on-death', 'count-villager', 'count-aura-seer', 'count-doctor',
-    'count-witch', 'count-priest', 'count-werewolf', 'count-nightmare-werewolf',
-    'count-wolf-seer', 'count-cursed-wolf', 'count-arsonist', 'count-fool'
+    'reveal-on-death',
+    ...roleSettingsKeys.map(key => `count-${key.replace(/_/g, '-')}`)
 ];
 settingElements.forEach(id => {
     const el = document.getElementById(id);
@@ -545,25 +609,30 @@ btnStartGame.addEventListener('click', () => {
     }
 });
 
-btnSendChat.addEventListener('click', () => {
-    const msg = chatInput.value.trim();
-    if (msg && currentRoomCode) {
-        socket.emit('sendMessage', { roomCode: currentRoomCode, message: msg });
-        chatInput.value = '';
-    }
-});
+btnSendChat.addEventListener('click', () => sendRoomChatMessage(chatInput));
+btnSendWaitingChat.addEventListener('click', () => sendRoomChatMessage(waitingChatInput));
 
 chatInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') btnSendChat.click();
 });
 
+waitingChatInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') btnSendWaitingChat.click();
+});
+
+function switchChatTab(targetId) {
+    tabBtns.forEach(b => b.classList.remove('active'));
+    const targetBtn = document.querySelector(`.tab-btn[data-target="${targetId}"]`);
+    if (targetBtn) targetBtn.classList.add('active');
+
+    document.querySelectorAll('.chat-box').forEach(box => box.classList.add('hidden'));
+    const targetBox = document.getElementById(targetId);
+    if (targetBox) targetBox.classList.remove('hidden');
+}
+
 tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
-        tabBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-
-        document.querySelectorAll('.chat-box').forEach(box => box.classList.add('hidden'));
-        document.getElementById(btn.dataset.target).classList.remove('hidden');
+        switchChatTab(btn.dataset.target);
     });
 });
 
@@ -598,6 +667,8 @@ socket.on('roomCreated', (data) => {
     currentRoomCode = data.roomCode;
     myPlayerInfo = data.player;
     displayRoomCode.textContent = currentRoomCode;
+    waitingChat.innerHTML = '';
+    waitingChatInput.value = '';
     switchScreen('waiting');
     document.getElementById('btn-mic').style.display = 'block';
 
@@ -615,6 +686,8 @@ socket.on('roomJoined', (data) => {
     currentRoomCode = data.roomCode;
     myPlayerInfo = data.player;
     displayRoomCode.textContent = currentRoomCode;
+    waitingChat.innerHTML = '';
+    waitingChatInput.value = '';
     switchScreen('waiting');
     document.getElementById('btn-mic').style.display = 'block';
 
@@ -627,14 +700,8 @@ socket.on('settingsUpdated', (settings) => {
     if (myPlayerInfo && !myPlayerInfo.isHost) {
         document.getElementById('reveal-on-death').checked = settings.revealRoleOnDeath;
 
-        // Map new roles
         if (settings.roles) {
-            const roleKeys = [
-                'villager', 'aura_seer', 'doctor', 'witch', 'priest',
-                'werewolf', 'nightmare_werewolf', 'wolf_seer', 'cursed_wolf',
-                'arsonist', 'fool'
-            ];
-            roleKeys.forEach(key => {
+            roleSettingsKeys.forEach(key => {
                 const el = document.getElementById(`count-${key.replace(/_/g, '-')}`);
                 if (el && settings.roles[key] !== undefined) {
                     el.value = settings.roles[key];
@@ -705,6 +772,7 @@ socket.on('gameStateUpdate', (gameState) => {
     if (gameState.state !== 'NIGHT') {
         nightActionMode = null;
         currentWerewolfVotes = [];
+        window.arsoTargets = [];
         hideWitchPanel();
         hideCursedWolfPanel();
     }
@@ -713,6 +781,9 @@ socket.on('gameStateUpdate', (gameState) => {
     }
     if (gameState.state === 'DAY') {
         actionTargetId = null; // reset day vote target
+    }
+    if ((gameState.state === 'DAY' || gameState.state === 'VOTE') && werewolfChat && !werewolfChat.classList.contains('hidden')) {
+        switchChatTab('general-chat');
     }
 
     if (gameState.state === 'ROLE_REVEAL' || gameState.state === 'NIGHT' || gameState.state === 'DAY' || gameState.state === 'VOTE') {
@@ -747,7 +818,7 @@ socket.on('gameStateUpdate', (gameState) => {
     renderPlayersGrid(gameState.players);
 });
 
-const roleTranslations = {
+const legacyRoleTranslations = {
     'WEREWOLF': 'Ma Sói',
     'AURA_SEER': 'Tiên Tri Hào Quang',
     'DOCTOR': 'Bác Sĩ',
@@ -761,7 +832,7 @@ const roleTranslations = {
     'PRIEST': 'Linh Mục'
 };
 
-const roleDescriptions = {
+const legacyRoleDescriptions = {
     'WEREWOLF': 
       'Phe Ma Sói. Mỗi đêm, bạn cùng bầy sói chọn 1 người để cắn. Mục tiêu của phe Sói là tiêu diệt hết Dân Làng và các phe đối địch.',
   
@@ -796,16 +867,12 @@ const roleDescriptions = {
       'Phe Dân Làng. Một lần vào ban ngày, bạn có thể tạt nước thánh vào 1 người. Nếu người đó là Sói, họ chết. Nếu không phải Sói, bạn chết.'
   };
 
+const roleTranslations = Object.fromEntries(roleDefinitions.map(role => [role.id, role.name]));
+const roleDescriptions = Object.fromEntries(roleDefinitions.map(role => [role.id, role.description]));
+const roleColors = Object.fromEntries(roleDefinitions.map(role => [role.id, role.color]));
+
 function getRoleColor(role) {
-    let roleColor = 'var(--text)';
-    if (['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'WOLF_SEER', 'CURSED_WOLF'].includes(role)) roleColor = 'var(--wolf-red)';
-    if (role === 'AURA_SEER') roleColor = '#8c52ff';
-    if (role === 'DOCTOR') roleColor = '#2ecc71';
-    if (role === 'WITCH') roleColor = '#9b59b6';
-    if (role === 'FOOL') roleColor = '#e67e22';
-    if (role === 'ARSONIST') roleColor = '#ff5722';
-    if (role === 'PRIEST') roleColor = '#00bcd4';
-    return roleColor;
+    return roleColors[role] || 'var(--text)';
 }
 
 function setRoleDisplay(role) {
@@ -887,18 +954,17 @@ socket.on('timerUpdate', (time) => {
 });
 
 socket.on('systemMessage', (msg) => {
+    if (!currentGameState || currentGameState.state === 'LOBBY') {
+        appendChatMessage(waitingChat, { isSystem: true, message: msg });
+        return;
+    }
     appendChatMessage(generalChat, { isSystem: true, message: msg });
 });
 
 socket.on('werewolfInfo', (names) => {
-    appendChatMessage(werewolfChat, { isSystem: true, message: `Bầy sói đêm nay: ${names}` });
+    appendChatMessage(werewolfChat, { isSystem: true, systemTheme: 'mystic', message: `Bầy sói đêm nay: ${names}` });
     document.getElementById('werewolf-tab').classList.remove('hidden');
-    // Auto-switch to werewolf tab
-    tabBtns.forEach(b => b.classList.remove('active'));
-    const wTab = document.getElementById('werewolf-tab');
-    wTab.classList.add('active');
-    document.querySelectorAll('.chat-box').forEach(box => box.classList.add('hidden'));
-    werewolfChat.classList.remove('hidden');
+    switchChatTab('werewolf-chat');
 });
 
 // yourTurn: Server tells this client it's their turn to act
@@ -949,6 +1015,11 @@ socket.on('dayVoteUpdate', (voteInfo) => {
 socket.on('slotTimerUpdate', (timeLeft) => { });
 
 socket.on('chatMessage', (data) => {
+    if (!currentGameState || currentGameState.state === 'LOBBY') {
+        appendChatMessage(waitingChat, data);
+        return;
+    }
+
     let container = generalChat;
     if (data.isWerewolfChannel) container = werewolfChat;
 
@@ -1030,6 +1101,9 @@ socket.on('gameReset', () => {
     window.arsoTargets = [];
     currentDayVotes = [];
     currentWerewolfVotes = [];
+    Object.keys(playerBubbleTimers).forEach(id => clearTimeout(playerBubbleTimers[id]));
+    Object.keys(playerBubbleTimers).forEach(id => delete playerBubbleTimers[id]);
+    Object.keys(activePlayerBubbles).forEach(id => delete activePlayerBubbles[id]);
     hideWitchPanel();
     myRoleDisplay.innerHTML = '?';
     myRoleDisplay.style.color = 'var(--text-main)';
@@ -1043,8 +1117,55 @@ socket.on('gameReset', () => {
     switchScreen('waiting');
 });
 
-// Track bubbles per player
+// Track chat bubbles separately from rendered cards, because vote/action updates rebuild the grid.
 const playerBubbleTimers = {};
+const activePlayerBubbles = {};
+
+function getPlayerCardId(playerId) {
+    return `player-card-${playerId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+}
+
+function createChatBubbleElement(message) {
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    bubble.textContent = message.length > 40 ? message.slice(0, 40) + 'â€¦' : message;
+    return bubble;
+}
+
+function removeChatBubble(senderId, animate = true) {
+    delete activePlayerBubbles[senderId];
+    if (playerBubbleTimers[senderId]) {
+        clearTimeout(playerBubbleTimers[senderId]);
+        delete playerBubbleTimers[senderId];
+    }
+
+    const card = document.getElementById(getPlayerCardId(senderId));
+    const bubble = card ? card.querySelector('.chat-bubble') : null;
+    if (!bubble) return;
+
+    if (!animate) {
+        bubble.remove();
+        return;
+    }
+
+    bubble.style.opacity = '0';
+    bubble.style.transition = 'opacity 0.4s';
+    setTimeout(() => bubble.remove(), 400);
+}
+
+function attachActiveChatBubble(card, playerId) {
+    const activeBubble = activePlayerBubbles[playerId];
+    if (!activeBubble) return;
+
+    if (activeBubble.expiresAt <= Date.now()) {
+        removeChatBubble(playerId, false);
+        return;
+    }
+
+    const old = card.querySelector('.chat-bubble');
+    if (old) old.remove();
+    card.appendChild(createChatBubbleElement(activeBubble.message));
+}
 
 function renderPlayersGrid(players) {
     gamePlayersGrid.innerHTML = '';
@@ -1054,11 +1175,33 @@ function renderPlayersGrid(players) {
 
     const total = players.length;
     const container = gamePlayersGrid;
+    const playerNumberById = new Map(players.map((player, index) => [player.id, index + 1]));
+    const voteCountByTarget = new Map();
+    const playerPositionById = new Map();
+
+    players.forEach((player, index) => {
+        let radius = 42;
+        if (total <= 5) radius = 28;
+        else if (total <= 8) radius = 35;
+
+        const angle = (2 * Math.PI * index / total) - Math.PI / 2;
+        playerPositionById.set(player.id, {
+            x: 50 + radius * Math.cos(angle),
+            y: 50 + radius * Math.sin(angle)
+        });
+    });
+
+    if (currentGameState && currentGameState.state === 'VOTE') {
+        currentDayVotes.forEach(vote => {
+            if (!vote.targetId) return;
+            voteCountByTarget.set(vote.targetId, (voteCountByTarget.get(vote.targetId) || 0) + 1);
+        });
+    }
 
     players.forEach((p, idx) => {
         const div = document.createElement('div');
         div.dataset.playerId = p.id;
-        div.id = `player-card-${p.id.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        div.id = getPlayerCardId(p.id);
 
         const classes = ['player-card'];
         if (!p.isAlive) classes.push('dead');
@@ -1066,16 +1209,7 @@ function renderPlayersGrid(players) {
         div.className = classes.join(' ');
 
         // Position in circle using % so it's responsive. Scale radius based on player count.
-        const angle = (2 * Math.PI * idx / total) - Math.PI / 2;
-
-        let radius = 42;
-        if (total <= 5) radius = 28;
-        else if (total <= 8) radius = 35;
-
-        const rx = radius; // % radius X
-        const ry = radius; // % radius Y
-        const cx = 50 + rx * Math.cos(angle);
-        const cy = 50 + ry * Math.sin(angle);
+        const { x: cx, y: cy } = playerPositionById.get(p.id);
         div.style.left = `${cx}%`;
         div.style.top = `${cy}%`;
 
@@ -1101,8 +1235,45 @@ function renderPlayersGrid(players) {
         }
         infoDiv.innerHTML = displayContent;
 
-        // --- VOTE BADGES ---
         if (currentGameState && currentGameState.state === 'VOTE') {
+            const voteCount = voteCountByTarget.get(p.id) || 0;
+            if (voteCount > 0) {
+                const countBadge = document.createElement('div');
+                countBadge.className = 'vote-count-badge';
+                countBadge.textContent = `${voteCount}`;
+                countBadge.title = `${voteCount} phiếu đang hướng vào ${p.name}`;
+                div.appendChild(countBadge);
+            }
+
+            const currentVote = currentDayVotes.find(v => v.voterId === p.id);
+            if (currentVote && currentVote.targetId && currentVote.targetId !== p.id) {
+                const targetPosition = playerPositionById.get(currentVote.targetId);
+                const targetNumber = playerNumberById.get(currentVote.targetId);
+
+                if (targetPosition && targetNumber) {
+                    const dx = targetPosition.x - cx;
+                    const dy = targetPosition.y - cy;
+                    const pointer = document.createElement('div');
+                    pointer.className = `vote-pointer ${getVotePointerPositionClass(dx, dy)}`;
+                    pointer.title = `${p.name} đang vote người số ${targetNumber}`;
+
+                    const hand = document.createElement('span');
+                    hand.className = 'vote-pointer-hand';
+                    hand.textContent = getVotePointerEmoji(dx, dy);
+
+                    const number = document.createElement('span');
+                    number.className = 'vote-pointer-number';
+                    number.textContent = `${targetNumber}`;
+
+                    pointer.appendChild(hand);
+                    pointer.appendChild(number);
+                    div.appendChild(pointer);
+                }
+            }
+        }
+
+        // --- VOTE BADGES ---
+        if (false && currentGameState && currentGameState.state === 'VOTE') {
             const voters = currentDayVotes.filter(v => v.targetId === p.id).map(v => v.voterName);
             if (voters.length > 0) {
                 const badge = document.createElement('div');
@@ -1146,6 +1317,28 @@ function renderPlayersGrid(players) {
             div.appendChild(dousedBadge);
         }
 
+        if (myPlayerInfo && myPlayerInfo.role === 'DOCTOR' && myPlayerInfo.doctorProtectedTargetId === p.id) {
+            const healBadge = document.createElement('div');
+            healBadge.innerHTML = '🛡️';
+            healBadge.style.position = 'absolute';
+            healBadge.style.top = '5px';
+            healBadge.style.left = '5px';
+            healBadge.style.fontSize = '1.2rem';
+            healBadge.title = 'Đang được bảo vệ đêm nay';
+            div.appendChild(healBadge);
+        }
+
+        if (myPlayerInfo && myPlayerInfo.role === 'NIGHTMARE_WEREWOLF' && (myPlayerInfo.sleepingPlayerId === p.id || myPlayerInfo.sleptThisNightId === p.id)) {
+            const sleepBadge = document.createElement('div');
+            sleepBadge.innerHTML = '💤';
+            sleepBadge.style.position = 'absolute';
+            sleepBadge.style.top = '5px';
+            sleepBadge.style.left = '5px';
+            sleepBadge.style.fontSize = '1.2rem';
+            sleepBadge.title = myPlayerInfo.sleepingPlayerId === p.id ? 'Đã chọn ru ngủ cho đêm tới' : 'Đang bị ru ngủ đêm nay';
+            div.appendChild(sleepBadge);
+        }
+
         div.appendChild(img);
         div.appendChild(infoDiv);
 
@@ -1184,6 +1377,7 @@ function renderPlayersGrid(players) {
                 'WOLF_SEER_CHECK': 'targeted-see',
                 'AURA_SEER_CHECK': 'targeted-see',
                 'ARSONIST_DOUSE': 'targeted-douse',
+                'NIGHTMARE_SLEEP': 'targeted-sleep',
                 'ARSONIST_IGNITE': 'targeted-ignite',
                 'DOCTOR_HEAL': 'targeted-heal',
                 'WITCH_TARGET': 'targeted-see',
@@ -1195,7 +1389,7 @@ function renderPlayersGrid(players) {
                     canTarget = true; actionType = 'WOLF_SEER_RESIGN';
                     div.title = "Nhấn để TỪ BỎ quyền soi, bắt đầu đi cắn";
                 }
-                if (role === 'ARSONIST') {
+                if (role === 'ARSONIST' && !myPlayerInfo.arsonistIgniteUsed) {
                     canTarget = true; actionType = 'ARSONIST_IGNITE';
                     div.classList.add('targeted-ignite');
                     div.title = "Nhấn để CHÂM LỬA (Tiêu diệt tất cả người bị douse)";
@@ -1214,18 +1408,25 @@ function renderPlayersGrid(players) {
                         div.title = "Nhấn chọn làm mục tiêu";
                         if (myPlayerInfo.cursedWolfTarget === p.id) div.classList.add('targeted-see');
                     }
-                } else if (['WEREWOLF', 'NIGHTMARE_WEREWOLF', 'CURSED_WOLF'].includes(role) && !isWolfTeamMember(p)) {
+                } else if (roleRegistry.isWolfRole(role) && role !== 'WOLF_SEER' && !isWolfTeamMember(p)) {
                     canTarget = true; actionType = 'WEREWOLF_KILL';
                     div.title = "Nhấn để cắn người này";
                     if (currentWerewolfVotes.find(v => v.voterId === socket.id && v.targetId === p.id)) div.classList.add(targetClass[actionType]);
                 } else if (role === 'WOLF_SEER' && !isWolfTeamMember(p)) {
-                    canTarget = true; actionType = window.wolfSeerResigned ? 'WEREWOLF_KILL' : 'WOLF_SEER_CHECK';
-                    div.title = window.wolfSeerResigned ? "Nhấn để cắn người này" : "Nhấn để Soi vai trò người này";
-                    if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                    if (window.wolfSeerResigned) {
+                        canTarget = true; actionType = 'WEREWOLF_KILL';
+                        div.title = "Nhấn để cắn người này";
+                    } else if (!myPlayerInfo.wolfSeerUsedTonight) {
+                        canTarget = true; actionType = 'WOLF_SEER_CHECK';
+                        div.title = "Nhấn để Soi vai trò người này";
+                    }
+                    if (actionType && p.id === actionTargetId) div.classList.add(targetClass[actionType]);
                 } else if (role === 'AURA_SEER' && myPlayerInfo.role === 'AURA_SEER') {
-                    canTarget = true; actionType = 'AURA_SEER_CHECK';
-                    div.title = "Nhấn để Soi người này";
-                    if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                    if (!myPlayerInfo.auraSeerUsedTonight || hasConvertedWolfActions(myPlayerInfo)) {
+                        canTarget = true; actionType = 'AURA_SEER_CHECK';
+                        div.title = myPlayerInfo.auraSeerUsedTonight ? "Nhấn để vote giết người này" : "Nhấn để Soi người này";
+                        if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                    }
                 } else if (role === 'ARSONIST' && myPlayerInfo.role === 'ARSONIST') {
                     if (myPlayerInfo.arsonistDoused && myPlayerInfo.arsonistDoused.includes(p.id)) {
                         canTarget = false;
@@ -1241,6 +1442,7 @@ function renderPlayersGrid(players) {
                         canTarget = true; actionType = 'DOCTOR_HEAL';
                         div.title = "Nhấn để Bảo vệ người này";
                     }
+                    if (myPlayerInfo.doctorProtectedTargetId === p.id) div.classList.add('targeted-heal');
                     if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
                 } else if (role === 'WITCH' && nightActionMode === 'WITCH') {
                     canTarget = true; actionType = 'WITCH_TARGET';
@@ -1309,14 +1511,16 @@ function renderPlayersGrid(players) {
                         const roleChoices = [];
 
                         if (actionType === 'AURA_SEER_CHECK') {
-                            roleChoices.push({
-                                label: 'Soi phe',
-                                onClick: () => {
-                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AURA_SEER_CHECK', targetId: p.id });
-                                    showNotification(`Đang soi phe ${p.name}.`);
-                                    renderPlayersGrid(currentGameState.players);
-                                }
-                            });
+                            if (!myPlayerInfo.auraSeerUsedTonight) {
+                                roleChoices.push({
+                                    label: 'Soi phe',
+                                    onClick: () => {
+                                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AURA_SEER_CHECK', targetId: p.id });
+                                        showNotification(`Đang soi phe ${p.name}.`);
+                                        renderPlayersGrid(currentGameState.players);
+                                    }
+                                });
+                            }
                         } else if (actionType === 'DOCTOR_HEAL') {
                             roleChoices.push({
                                 label: 'Bảo vệ',
@@ -1487,6 +1691,7 @@ function renderPlayersGrid(players) {
 
             if (myPlayerInfo.role === 'NIGHTMARE_WEREWOLF' && !isWolfTeamMember(p)) {
                 canTarget = true; actionType = 'NIGHTMARE_SLEEP';
+                if (myPlayerInfo.sleepingPlayerId === p.id) div.classList.add('targeted-sleep');
             } else if (myPlayerInfo.role === 'PRIEST') {
                 canTarget = true; actionType = 'PRIEST_WATER';
             }
@@ -1520,13 +1725,29 @@ function renderPlayersGrid(players) {
             });
         }
 
+        attachActiveChatBubble(div, p.id);
         container.appendChild(div);
     });
 }
 
 // Show a floating chat bubble on a player's card
 function showChatBubble(senderId, message) {
-    const safeId = senderId.replace(/[^a-zA-Z0-9]/g, '_');
+    activePlayerBubbles[senderId] = {
+        message,
+        expiresAt: Date.now() + 4000
+    };
+
+    if (playerBubbleTimers[senderId]) clearTimeout(playerBubbleTimers[senderId]);
+
+    const activeCard = document.getElementById(getPlayerCardId(senderId));
+    if (activeCard) attachActiveChatBubble(activeCard, senderId);
+
+    playerBubbleTimers[senderId] = setTimeout(() => {
+        removeChatBubble(senderId);
+    }, 4000);
+    return;
+
+    /*
     const card = document.getElementById(`player-card-${safeId}`);
     if (!card) return;
 
@@ -1547,6 +1768,7 @@ function showChatBubble(senderId, message) {
         bubble.style.transition = 'opacity 0.4s';
         setTimeout(() => bubble.remove(), 400);
     }, 4000);
+    */
 }
 
 
@@ -1643,6 +1865,22 @@ function showCursedWolfPanel() {
 function hideCursedWolfPanel() {
     const panel = document.getElementById('cursed-wolf-panel');
     if (panel) panel.classList.add('hidden');
+}
+
+function getVotePointerEmoji(dx, dy) {
+    if (Math.abs(dx) >= Math.abs(dy)) {
+        return dx >= 0 ? '👉' : '👈';
+    }
+
+    return dy >= 0 ? '👇' : '👆';
+}
+
+function getVotePointerPositionClass(dx, dy) {
+    if (Math.abs(dx) >= Math.abs(dy)) {
+        return dx >= 0 ? 'vote-pointer-right' : 'vote-pointer-left';
+    }
+
+    return dy >= 0 ? 'vote-pointer-bottom' : 'vote-pointer-top';
 }
 
 function triggerDayActionModal(targetPlayer) {

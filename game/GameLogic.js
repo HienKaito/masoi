@@ -32,6 +32,8 @@ class GameLogic {
         this.cursedWolfTarget = null;
         this.tempArsoTargets = {};
         this.arsonistIgniteUsed = false;
+        this.redLadyVisitTargets = {};
+        this.maidProtectedTargetIds = {};
     }
 
     isWolfAligned(player) {
@@ -46,6 +48,14 @@ class GameLogic {
         return this.isWolfAligned(viewer) && this.isWolfAligned(target);
     }
 
+    isSoloKiller(player) {
+        return !!player && player.role === 'ARSONIST';
+    }
+
+    canAvengerTrigger() {
+        return this.dayNumber > 1 || (this.dayNumber === 1 && this.state !== 'NIGHT');
+    }
+
     addPlayer(socketId, name, isHost) {
         this.players[socketId] = {
             id: socketId,
@@ -58,7 +68,10 @@ class GameLogic {
             seenRoles: {}, // targetId -> roleName
             seenAuras: {}, // targetId -> Good | Evil | Unknown
             auraSeerUsedTonight: false,
-            wolfSeerUsedTonight: false
+            wolfSeerUsedTonight: false,
+            loudmouthTargetId: null,
+            avengerTargetId: null,
+            publiclyRevealedRole: false
         };
         return this.players[socketId];
     }
@@ -83,6 +96,7 @@ class GameLogic {
         return Object.values(this.players).map(p => {
             let reveal = false;
             if (p.id === forSocketId) reveal = true;
+            if (p.publiclyRevealedRole) reveal = true;
             if (this.state === 'GAME_OVER' || (!p.isAlive && this.revealRoleOnDeath)) reveal = true;
             if (this.canWolfTeamRevealRole(forPlayer, p)) reveal = true;
             
@@ -172,6 +186,8 @@ class GameLogic {
         this.tempArsoTargets = {};
         this.cursedWolfTarget = null;
         this.doctorProtectedTargetId = null;
+        this.redLadyVisitTargets = {};
+        this.maidProtectedTargetIds = {};
         Object.values(this.players).forEach(p => {
             p.auraSeerUsedTonight = false;
             p.wolfSeerUsedTonight = false;
@@ -368,6 +384,42 @@ class GameLogic {
                 this.nightActions.push({ type: 'DOCTOR_HEAL', targetId: targetId, priority: 1 });
                 this.doctorProtectedTargetId = targetId;
                 this.updateClientState();
+            } else if (actionType === 'RED_LADY_VISIT' && player.role === 'RED_LADY') {
+                if (!this.players[targetId] || !this.players[targetId].isAlive || targetId === socketId) {
+                    this.io.to(socketId).emit('error', 'Bạn phải chọn một người chơi còn sống khác để ghé thăm.');
+                    return;
+                }
+                this.redLadyVisitTargets[socketId] = targetId;
+                this.nightActions = this.nightActions.filter(a => a.type !== 'RED_LADY_VISIT' || a.socketId !== socketId);
+                this.nightActions.push({ type: 'RED_LADY_VISIT', socketId, targetId, priority: 1 });
+                this.io.to(socketId).emit('systemMessage', `Đã chọn ghé thăm ${this.players[targetId].name} đêm nay.`);
+                this.updateClientState();
+            } else if (actionType === 'LOUDMOUTH_SELECT' && player.role === 'LOUDMOUTH') {
+                if (!this.players[targetId] || !this.players[targetId].isAlive || targetId === socketId) {
+                    this.io.to(socketId).emit('error', 'Bạn phải chọn một người chơi còn sống khác.');
+                    return;
+                }
+                player.loudmouthTargetId = targetId;
+                this.io.to(socketId).emit('systemMessage', `Khi bạn chết, vai trò của ${this.players[targetId].name} sẽ bị tiết lộ.`);
+                this.updateClientState();
+            } else if (actionType === 'MAID_PROTECT' && player.role === 'MAID') {
+                if (!this.players[targetId] || !this.players[targetId].isAlive || targetId === socketId) {
+                    this.io.to(socketId).emit('error', 'Bạn phải chọn một người chơi còn sống khác để bảo vệ.');
+                    return;
+                }
+                this.maidProtectedTargetIds[socketId] = targetId;
+                this.nightActions = this.nightActions.filter(a => a.type !== 'MAID_PROTECT' || a.socketId !== socketId);
+                this.nightActions.push({ type: 'MAID_PROTECT', socketId, targetId, priority: 1 });
+                this.io.to(socketId).emit('systemMessage', `Đã chọn bảo vệ ${this.players[targetId].name} đêm nay.`);
+                this.updateClientState();
+            } else if (actionType === 'AVENGER_SELECT' && player.role === 'AVENGER') {
+                if (!this.players[targetId] || !this.players[targetId].isAlive || targetId === socketId) {
+                    this.io.to(socketId).emit('error', 'Bạn phải chọn một người chơi còn sống khác làm mục tiêu báo thù.');
+                    return;
+                }
+                player.avengerTargetId = targetId;
+                this.io.to(socketId).emit('systemMessage', `Đã chọn ${this.players[targetId].name} làm mục tiêu báo thù.`);
+                this.updateClientState();
             } else if (actionType === 'WITCH_HEAL' && player.role === 'WITCH' && this.witchHealPotion) {
                 this.nightActions = this.nightActions.filter(a => !a.type.startsWith('WITCH_'));
                 this.nightActions.push({ type: 'WITCH_HEAL', targetId: targetId, priority: 2 });
@@ -384,6 +436,14 @@ class GameLogic {
                 this.dayVotes[socketId] = targetId;
             }
             this.broadcastDayVotes();
+        } else if ((this.state === 'DAY' || this.state === 'VOTE') && actionType === 'AVENGER_SELECT' && player.role === 'AVENGER') {
+            if (!this.players[targetId] || !this.players[targetId].isAlive || targetId === socketId) {
+                this.io.to(socketId).emit('error', 'Bạn phải chọn một người chơi còn sống khác làm mục tiêu báo thù.');
+                return;
+            }
+            player.avengerTargetId = targetId;
+            this.io.to(socketId).emit('systemMessage', `Đã chọn ${this.players[targetId].name} làm mục tiêu báo thù.`);
+            this.updateClientState();
         } else if (this.state === 'DAY' && actionType === 'NIGHTMARE_SLEEP' && player.role === 'NIGHTMARE_WEREWOLF') {
             if (this.nightmareSleepCharges > 0) {
                 const hadSelectedTarget = !!this.sleepingPlayerId;
@@ -401,18 +461,58 @@ class GameLogic {
         } else if (this.state === 'DAY' && actionType === 'PRIEST_WATER' && player.role === 'PRIEST') {
             if (!this.priestUsed) {
                 this.priestUsed = true;
-                const targetRole = this.players[targetId].role;
                 if (this.isWolfAligned(this.players[targetId])) {
-                    this.players[targetId].isAlive = false;
+                    const deaths = this.applyDeaths([targetId]);
                     this.broadcastSystemMessage(`Priest ${player.name} đã tạt nước thánh tiêu diệt sói ${this.players[targetId].name}!`);
+                    deaths.forEach(id => this.io.to(id).emit('systemMessage', 'Bạn đã chết vì nước thánh hoặc báo thù.'));
                 } else {
-                    player.isAlive = false;
+                    const deaths = this.applyDeaths([socketId]);
                     this.broadcastSystemMessage(`Priest ${player.name} đã tạt nhầm nước thánh vào người vô tội và bị trừng phạt!`);
+                    deaths.forEach(id => this.io.to(id).emit('systemMessage', 'Bạn đã chết vì nước thánh hoặc báo thù.'));
                 }
                 this.updateClientState();
                 this.checkWinCondition();
             } else {
                 this.io.to(socketId).emit('error', 'Bạn đã sử dụng nước thánh rồi.');
+            }
+        }
+    }
+
+    applyDeaths(initialDeathIds) {
+        const deaths = new Set();
+        const queue = Array.from(new Set(initialDeathIds)).filter(id => this.players[id] && this.players[id].isAlive);
+
+        while (queue.length > 0) {
+            const id = queue.shift();
+            const player = this.players[id];
+            if (!player || !player.isAlive) continue;
+
+            player.isAlive = false;
+            deaths.add(id);
+            this.handleDeathTriggers(id, queue, deaths);
+        }
+
+        return deaths;
+    }
+
+    handleDeathTriggers(deadId, queue, deaths) {
+        const deadPlayer = this.players[deadId];
+        if (!deadPlayer) return;
+
+        if (deadPlayer.role === 'LOUDMOUTH' && deadPlayer.loudmouthTargetId) {
+            const target = this.players[deadPlayer.loudmouthTargetId];
+            if (target) {
+                target.publiclyRevealedRole = true;
+                const roleName = RoleRegistry.get(target.role)?.name || target.role;
+                this.broadcastSystemMessage(`Bé Mồm Bự ${deadPlayer.name} đã chết. Vai trò của ${target.name} là ${roleName}.`);
+            }
+        }
+
+        if (deadPlayer.role === 'AVENGER' && deadPlayer.avengerTargetId && this.canAvengerTrigger()) {
+            const target = this.players[deadPlayer.avengerTargetId];
+            if (target && target.isAlive && !deaths.has(target.id) && !queue.includes(target.id)) {
+                queue.push(target.id);
+                this.broadcastSystemMessage(`Kẻ Báo Thù ${deadPlayer.name} kéo ${target.name} chết cùng.`);
             }
         }
     }
@@ -424,6 +524,8 @@ class GameLogic {
         let protections = {}; // targetId -> array of protective sources
         let lethalAttacks = []; // array of { targetId, source }
         let newlyDousedTonight = [];
+        const redLadyVisits = {};
+        const maidProtections = {};
         
         // Reset doctor tracker
         this.doctorLastHealed = null;
@@ -434,6 +536,10 @@ class GameLogic {
                 if (!protections[action.targetId]) protections[action.targetId] = [];
                 protections[action.targetId].push('DOCTOR');
                 this.doctorLastHealed = action.targetId;
+            } else if (action.type === 'RED_LADY_VISIT') {
+                redLadyVisits[action.socketId] = action.targetId;
+            } else if (action.type === 'MAID_PROTECT') {
+                maidProtections[action.socketId] = action.targetId;
             } else if (action.type === 'WITCH_HEAL') {
                 if (!protections[action.targetId]) protections[action.targetId] = [];
                 protections[action.targetId].push('WITCH');
@@ -466,11 +572,32 @@ class GameLogic {
             }
         }
 
+        Object.values(this.players).forEach(p => {
+            if (!p.isAlive || p.role !== 'MAID') return;
+
+            if (!protections[p.id]) protections[p.id] = [];
+            protections[p.id].push('MAID_SELF');
+
+            const protectedTargetId = maidProtections[p.id];
+            if (protectedTargetId && this.players[protectedTargetId] && this.players[protectedTargetId].isAlive) {
+                if (!protections[protectedTargetId]) protections[protectedTargetId] = [];
+                protections[protectedTargetId].push({ type: 'MAID', protectorId: p.id });
+            }
+        });
+
         let deaths = new Set();
+        const attackedTargets = new Set(lethalAttacks.map(attack => attack.targetId));
+        const usedMaidProtections = new Set();
+        const usedMaidSelfProtections = new Set();
 
         // Evaluate attacks against protections
         for (const attack of lethalAttacks) {
             const targetProtections = protections[attack.targetId] || [];
+            const attackedPlayer = this.players[attack.targetId];
+
+            if (attackedPlayer && attackedPlayer.role === 'RED_LADY' && redLadyVisits[attack.targetId]) {
+                continue;
+            }
             
             if (attack.source === 'WEREWOLF') {
                 if (this.players[attack.targetId] && this.players[attack.targetId].role === 'ARSONIST') {
@@ -479,6 +606,24 @@ class GameLogic {
                 // Werewolf kill blocked by Doctor or Witch heal
                 if (targetProtections.includes('DOCTOR') || targetProtections.includes('WITCH') || targetProtections.includes('CURSED_WOLF')) {
                     continue; // Survived
+                }
+                if (targetProtections.includes('MAID_SELF') && !usedMaidSelfProtections.has(attack.targetId)) {
+                    usedMaidSelfProtections.add(attack.targetId);
+                    continue;
+                }
+
+                const maidProtection = targetProtections.find(protection => {
+                    return protection
+                        && protection.type === 'MAID'
+                        && !usedMaidProtections.has(protection.protectorId)
+                        && this.players[protection.protectorId]
+                        && this.players[protection.protectorId].isAlive;
+                });
+
+                if (maidProtection) {
+                    usedMaidProtections.add(maidProtection.protectorId);
+                    deaths.add(maidProtection.protectorId);
+                    continue;
                 }
             } else if (attack.source === 'WITCH') {
                 // Witch poison ignores Doctor heal (usually), but Witch heal doesn't exist simultaneously with poison for 1 witch
@@ -492,12 +637,18 @@ class GameLogic {
             deaths.add(attack.targetId);
         }
 
-        deaths.forEach(id => {
-            if (this.players[id]) {
-                this.players[id].isAlive = false;
-                this.io.to(id).emit('systemMessage', 'Bạn đã chết trong đêm qua.');
+        for (const [redLadyId, targetId] of Object.entries(redLadyVisits)) {
+            const redLady = this.players[redLadyId];
+            const target = this.players[targetId];
+            if (!redLady || !redLady.isAlive || !target) continue;
+
+            if (attackedTargets.has(targetId) || this.isWolfAligned(target) || this.isSoloKiller(target)) {
+                deaths.add(redLadyId);
             }
-        });
+        }
+
+        deaths = this.applyDeaths(deaths);
+        deaths.forEach(id => this.io.to(id).emit('systemMessage', 'Bạn đã chết trong đêm qua.'));
 
         this.arsonistDoused = this.arsonistDoused.filter(id => this.players[id] && this.players[id].isAlive);
         this.arsonistNewlyDoused = newlyDousedTonight.filter(id => this.players[id] && this.players[id].isAlive);
@@ -623,9 +774,12 @@ class GameLogic {
         };
 
         if (lynchedId) {
-            this.players[lynchedId].isAlive = false;
+            const deaths = this.applyDeaths([lynchedId]);
             this.broadcastSystemMessage(`Dân làng đã quyết định treo cổ ${this.players[lynchedId].name}.`);
             this.io.to(lynchedId).emit('systemMessage', 'Bạn đã bị dân làng treo cổ.');
+            deaths.forEach(id => {
+                if (id !== lynchedId) this.io.to(id).emit('systemMessage', 'Bạn đã chết vì bị Kẻ Báo Thù kéo theo.');
+            });
             
             // Kẻ Ngốc win condition
             if (this.players[lynchedId].role === 'FOOL') {
@@ -717,6 +871,8 @@ class GameLogic {
         this.cursedWolfTarget = null;
         this.arsonistIgniteUsed = false;
         this.tempArsoTargets = {};
+        this.redLadyVisitTargets = {};
+        this.maidProtectedTargetIds = {};
 
         Object.values(this.players).forEach(p => {
             p.role = null;
@@ -726,6 +882,9 @@ class GameLogic {
             p.seenAuras = {};
             p.auraSeerUsedTonight = false;
             p.wolfSeerUsedTonight = false;
+            p.loudmouthTargetId = null;
+            p.avengerTargetId = null;
+            p.publiclyRevealedRole = false;
         });
 
         this.io.to(this.roomCode).emit('gameReset');
@@ -794,6 +953,10 @@ class GameLogic {
                     auraSeerUsedTonight: this.players[socketId].role === 'AURA_SEER' ? this.players[socketId].auraSeerUsedTonight : false,
                     wolfSeerUsedTonight: this.players[socketId].role === 'WOLF_SEER' ? this.players[socketId].wolfSeerUsedTonight : false,
                     cursedWolfTarget: this.players[socketId].role === 'CURSED_WOLF' ? this.cursedWolfTarget : null,
+                    redLadyVisitTargetId: this.players[socketId].role === 'RED_LADY' ? this.redLadyVisitTargets[socketId] || null : null,
+                    maidProtectedTargetId: this.players[socketId].role === 'MAID' ? this.maidProtectedTargetIds[socketId] || null : null,
+                    loudmouthTargetId: this.players[socketId].role === 'LOUDMOUTH' ? this.players[socketId].loudmouthTargetId : null,
+                    avengerTargetId: this.players[socketId].role === 'AVENGER' ? this.players[socketId].avengerTargetId : null,
                     currentWerewolfVote: this.werewolfVotes ? (this.werewolfVotes[socketId] || null) : null
                 }
             };

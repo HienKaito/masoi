@@ -990,6 +990,14 @@ socket.on('yourTurn', ({ role }) => {
             showNotification(`⏱ Lượt của bạn (${rName})! Nhấn vào thẻ để SOI. Nhấn vào tên của bạn để TỪ BỎ QUYỀN SOI.`);
         } else if (role === 'ARSONIST') {
             showNotification(`⏱ Lượt của bạn (${rName})! Nhấn vào 1-2 thẻ để TƯỚI XĂNG. Hoặc nhấn vào chính tên bạn để CHÂM LỬA.`);
+        } else if (role === 'RED_LADY') {
+            showNotification(`⏱ Lượt của bạn (${rName})! Chọn một người để ghé thăm đêm nay.`);
+        } else if (role === 'LOUDMOUTH') {
+            showNotification(`⏱ Lượt của bạn (${rName})! Chọn người sẽ bị lộ vai trò khi bạn chết.`);
+        } else if (role === 'MAID') {
+            showNotification(`⏱ Lượt của bạn (${rName})! Chọn người để bảo vệ đêm nay.`);
+        } else if (role === 'AVENGER') {
+            showNotification(`⏱ Lượt của bạn (${rName})! Chọn mục tiêu báo thù.`);
         } else {
             showNotification(`⏱ Lượt của bạn (${rName})! Chọn mục tiêu bằng cách nhấn vào thẻ bài (30s).`);
         }
@@ -1328,6 +1336,50 @@ function renderPlayersGrid(players) {
             div.appendChild(healBadge);
         }
 
+        if (myPlayerInfo && myPlayerInfo.role === 'RED_LADY' && myPlayerInfo.redLadyVisitTargetId === p.id) {
+            const visitBadge = document.createElement('div');
+            visitBadge.innerHTML = '🌹';
+            visitBadge.style.position = 'absolute';
+            visitBadge.style.top = '5px';
+            visitBadge.style.left = '5px';
+            visitBadge.style.fontSize = '1.2rem';
+            visitBadge.title = 'Đã chọn ghé thăm đêm nay';
+            div.appendChild(visitBadge);
+        }
+
+        if (myPlayerInfo && myPlayerInfo.role === 'MAID' && myPlayerInfo.maidProtectedTargetId === p.id) {
+            const maidBadge = document.createElement('div');
+            maidBadge.innerHTML = '🛎️';
+            maidBadge.style.position = 'absolute';
+            maidBadge.style.top = '5px';
+            maidBadge.style.left = '5px';
+            maidBadge.style.fontSize = '1.2rem';
+            maidBadge.title = 'Đã chọn bảo vệ đêm nay';
+            div.appendChild(maidBadge);
+        }
+
+        if (myPlayerInfo && myPlayerInfo.role === 'LOUDMOUTH' && myPlayerInfo.loudmouthTargetId === p.id) {
+            const loudmouthBadge = document.createElement('div');
+            loudmouthBadge.innerHTML = '📣';
+            loudmouthBadge.style.position = 'absolute';
+            loudmouthBadge.style.top = '5px';
+            loudmouthBadge.style.left = '5px';
+            loudmouthBadge.style.fontSize = '1.2rem';
+            loudmouthBadge.title = 'Vai trò sẽ bị lộ nếu bạn chết';
+            div.appendChild(loudmouthBadge);
+        }
+
+        if (myPlayerInfo && myPlayerInfo.role === 'AVENGER' && myPlayerInfo.avengerTargetId === p.id) {
+            const avengerBadge = document.createElement('div');
+            avengerBadge.innerHTML = '🗡️';
+            avengerBadge.style.position = 'absolute';
+            avengerBadge.style.top = '5px';
+            avengerBadge.style.left = '5px';
+            avengerBadge.style.fontSize = '1.2rem';
+            avengerBadge.title = 'Mục tiêu báo thù';
+            div.appendChild(avengerBadge);
+        }
+
         if (myPlayerInfo && myPlayerInfo.role === 'NIGHTMARE_WEREWOLF' && (myPlayerInfo.sleepingPlayerId === p.id || myPlayerInfo.sleptThisNightId === p.id)) {
             const sleepBadge = document.createElement('div');
             sleepBadge.innerHTML = '💤';
@@ -1381,7 +1433,11 @@ function renderPlayersGrid(players) {
                 'ARSONIST_IGNITE': 'targeted-ignite',
                 'DOCTOR_HEAL': 'targeted-heal',
                 'WITCH_TARGET': 'targeted-see',
-                'CURSED_WOLF_TURN': 'targeted-see'
+                'CURSED_WOLF_TURN': 'targeted-see',
+                'RED_LADY_VISIT': 'targeted-visit',
+                'LOUDMOUTH_SELECT': 'targeted-reveal',
+                'MAID_PROTECT': 'targeted-heal',
+                'AVENGER_SELECT': 'targeted-avenge'
             };
 
             if (p.id === socket.id) {
@@ -1444,6 +1500,22 @@ function renderPlayersGrid(players) {
                     }
                     if (myPlayerInfo.doctorProtectedTargetId === p.id) div.classList.add('targeted-heal');
                     if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                } else if (role === 'RED_LADY' && myPlayerInfo.role === 'RED_LADY') {
+                    canTarget = true; actionType = 'RED_LADY_VISIT';
+                    div.title = "Nhấn để ghé thăm người này";
+                    if (myPlayerInfo.redLadyVisitTargetId === p.id || p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                } else if (role === 'LOUDMOUTH' && myPlayerInfo.role === 'LOUDMOUTH') {
+                    canTarget = true; actionType = 'LOUDMOUTH_SELECT';
+                    div.title = "Nhấn để chọn người sẽ bị lộ vai trò khi bạn chết";
+                    if (myPlayerInfo.loudmouthTargetId === p.id || p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                } else if (role === 'MAID' && myPlayerInfo.role === 'MAID') {
+                    canTarget = true; actionType = 'MAID_PROTECT';
+                    div.title = "Nhấn để bảo vệ người này. Nếu họ bị tấn công, bạn chết thay.";
+                    if (myPlayerInfo.maidProtectedTargetId === p.id || p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                } else if (role === 'AVENGER' && myPlayerInfo.role === 'AVENGER') {
+                    canTarget = true; actionType = 'AVENGER_SELECT';
+                    div.title = "Nhấn để chọn mục tiêu báo thù";
+                    if (myPlayerInfo.avengerTargetId === p.id || p.id === actionTargetId) div.classList.add(targetClass[actionType]);
                 } else if (role === 'WITCH' && nightActionMode === 'WITCH') {
                     canTarget = true; actionType = 'WITCH_TARGET';
                     div.title = "Nhấn chọn làm mục tiêu dùng bình";
@@ -1527,6 +1599,42 @@ function renderPlayersGrid(players) {
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'DOCTOR_HEAL', targetId: p.id });
                                     showNotification(`Đã chọn bảo vệ ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        } else if (actionType === 'RED_LADY_VISIT') {
+                            roleChoices.push({
+                                label: 'Ghé thăm',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'RED_LADY_VISIT', targetId: p.id });
+                                    showNotification(`Đã chọn ghé thăm ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        } else if (actionType === 'LOUDMOUTH_SELECT') {
+                            roleChoices.push({
+                                label: 'Chọn tiết lộ',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'LOUDMOUTH_SELECT', targetId: p.id });
+                                    showNotification(`Đã chọn ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        } else if (actionType === 'MAID_PROTECT') {
+                            roleChoices.push({
+                                label: 'Bảo vệ thay',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'MAID_PROTECT', targetId: p.id });
+                                    showNotification(`Đã chọn bảo vệ ${p.name}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        } else if (actionType === 'AVENGER_SELECT') {
+                            roleChoices.push({
+                                label: 'Chọn báo thù',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AVENGER_SELECT', targetId: p.id });
+                                    showNotification(`Đã chọn ${p.name} làm mục tiêu báo thù.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -1651,6 +1759,22 @@ function renderPlayersGrid(players) {
                         return;
                     }
 
+                    if (['RED_LADY_VISIT', 'LOUDMOUTH_SELECT', 'MAID_PROTECT', 'AVENGER_SELECT'].includes(actionType)) {
+                        actionTargetId = p.id;
+                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
+                        if (!shouldKeepNightActionOpen()) nightActionMode = null;
+
+                        const messages = {
+                            RED_LADY_VISIT: `Đã chọn ghé thăm ${p.name}.`,
+                            LOUDMOUTH_SELECT: `Đã chọn ${p.name}.`,
+                            MAID_PROTECT: `Đã chọn bảo vệ ${p.name}.`,
+                            AVENGER_SELECT: `Đã chọn ${p.name} làm mục tiêu báo thù.`
+                        };
+                        showNotification(messages[actionType] || 'Đã chọn mục tiêu.');
+                        renderPlayersGrid(currentGameState.players);
+                        return;
+                    }
+
                     if (actionTargetId === p.id) {
                         actionTargetId = null;
                         div.classList.remove(targetClass[actionType]);
@@ -1694,12 +1818,25 @@ function renderPlayersGrid(players) {
                 if (myPlayerInfo.sleepingPlayerId === p.id) div.classList.add('targeted-sleep');
             } else if (myPlayerInfo.role === 'PRIEST') {
                 canTarget = true; actionType = 'PRIEST_WATER';
+            } else if (myPlayerInfo.role === 'AVENGER') {
+                canTarget = true; actionType = 'AVENGER_SELECT';
+                if (myPlayerInfo.avengerTargetId === p.id) div.classList.add('targeted-avenge');
             }
 
             if (canTarget) {
                 div.classList.add('clickable');
-                div.title = actionType === 'NIGHTMARE_SLEEP' ? 'Nhấn để ru ngủ (chỉ 2 lần/game)' : 'Nhấn để tạt nước thánh (chỉ 1 lần/game)';
+                div.title = actionType === 'NIGHTMARE_SLEEP'
+                    ? 'Nhấn để ru ngủ (chỉ 2 lần/game)'
+                    : actionType === 'AVENGER_SELECT'
+                        ? 'Nhấn để chọn mục tiêu báo thù'
+                        : 'Nhấn để tạt nước thánh (chỉ 1 lần/game)';
                 div.addEventListener('click', () => {
+                    if (actionType === 'AVENGER_SELECT') {
+                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
+                        showNotification(`Đã chọn ${p.name} làm mục tiêu báo thù.`);
+                        return;
+                    }
+
                     actionTitle.textContent = actionType === 'NIGHTMARE_SLEEP' ? 'Kỹ Năng Ru Ngủ' : 'Nước Thánh';
                     actionDescription.textContent = `Bạn có chắc muốn sử dụng kỹ năng lên ${p.name}?`;
                     pendingActionType = actionType;
@@ -1721,6 +1858,28 @@ function renderPlayersGrid(players) {
             }
 
             div.addEventListener('click', () => {
+                if (myPlayerInfo && myPlayerInfo.role === 'AVENGER') {
+                    const myVote = currentDayVotes.find(v => v.voterId === socket.id);
+                    const hasVote = myVote && myVote.targetId === p.id;
+                    openChoiceModal('Kẻ Báo Thù', `Chọn hành động với ${p.name}.`, [
+                        {
+                            label: hasVote ? 'Bỏ phiếu treo' : 'Bỏ phiếu',
+                            danger: true,
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'VOTE', targetId: p.id });
+                            }
+                        },
+                        {
+                            label: 'Chọn báo thù',
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AVENGER_SELECT', targetId: p.id });
+                                showNotification(`Đã chọn ${p.name} làm mục tiêu báo thù.`);
+                            }
+                        },
+                        { label: 'Đóng' }
+                    ]);
+                    return;
+                }
                 socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'VOTE', targetId: p.id });
             });
         }

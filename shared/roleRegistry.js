@@ -57,6 +57,46 @@
             description: 'Phe Dân Làng. Một lần vào ban ngày, bạn có thể tạt nước thánh vào 1 người. Nếu người đó là Sói, họ chết. Nếu không phải Sói, bạn chết.'
         },
         {
+            id: 'RED_LADY',
+            settingsKey: 'red_lady',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            hasNightAction: true,
+            name: 'Gái Điếm',
+            color: '#e11d48',
+            description: 'Phe Dân Làng. Mỗi đêm, bạn có thể ghé thăm 1 người. Nếu bị tấn công khi đang ghé thăm, bạn không chết. Nếu ghé thăm người bị tấn công, Ma Sói hoặc sát thủ đơn độc, bạn chết.'
+        },
+        {
+            id: 'LOUDMOUTH',
+            settingsKey: 'loudmouth',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            hasNightAction: true,
+            name: 'Bé Mồm Bự',
+            color: '#f59e0b',
+            description: 'Phe Dân Làng. Bạn có thể chọn 1 người. Khi bạn chết, vai trò của người đó sẽ bị tiết lộ cho tất cả mọi người.'
+        },
+        {
+            id: 'MAID',
+            settingsKey: 'maid',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            hasNightAction: true,
+            name: 'Hầu Gái',
+            color: '#14b8a6',
+            description: 'Phe Dân Làng. Mỗi đêm, bạn chọn 1 người để bảo vệ. Nếu người đó bị tấn công, họ sống sót và bạn chết thay. Bạn cũng tự bảo vệ bản thân trước đòn tấn công đầu tiên mỗi đêm.'
+        },
+        {
+            id: 'AVENGER',
+            settingsKey: 'avenger',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            hasNightAction: true,
+            name: 'Kẻ Báo Thù',
+            color: '#ef4444',
+            description: 'Phe Dân Làng. Bạn có thể chọn 1 người làm mục tiêu báo thù. Nếu bạn chết sau đêm đầu tiên, người đó sẽ chết cùng bạn.'
+        },
+        {
             id: 'WEREWOLF',
             settingsKey: 'werewolf',
             team: 'WEREWOLF',

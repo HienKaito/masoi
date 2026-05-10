@@ -659,7 +659,9 @@ function switchChatTab(targetId) {
     const targetBtn = document.querySelector(`.tab-btn[data-target="${targetId}"]`);
     if (targetBtn) targetBtn.classList.add('active');
 
-    document.querySelectorAll('.chat-box').forEach(box => box.classList.add('hidden'));
+    [generalChat, werewolfChat, ghostChat].forEach(box => {
+        if (box) box.classList.add('hidden');
+    });
     const targetBox = document.getElementById(targetId);
     if (targetBox) targetBox.classList.remove('hidden');
 }
@@ -702,6 +704,7 @@ socket.on('roomCreated', (data) => {
     myPlayerInfo = data.player;
     displayRoomCode.textContent = currentRoomCode;
     waitingChat.innerHTML = '';
+    waitingChat.classList.remove('hidden');
     waitingChatInput.value = '';
     switchScreen('waiting');
     document.getElementById('btn-mic').style.display = 'block';
@@ -721,6 +724,7 @@ socket.on('roomJoined', (data) => {
     myPlayerInfo = data.player;
     displayRoomCode.textContent = currentRoomCode;
     waitingChat.innerHTML = '';
+    waitingChat.classList.remove('hidden');
     waitingChatInput.value = '';
     switchScreen('waiting');
     document.getElementById('btn-mic').style.display = 'block';
@@ -1160,6 +1164,7 @@ socket.on('gameReset', () => {
     myRoleDisplay.style.borderColor = 'var(--text-main)';
     document.getElementById('werewolf-tab').classList.add('hidden');
     document.getElementById('ghost-tab').classList.add('hidden');
+    waitingChat.classList.remove('hidden');
     generalChat.innerHTML = '';
     werewolfChat.innerHTML = '';
     ghostChat.innerHTML = '';

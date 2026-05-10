@@ -810,7 +810,7 @@ class GameLogic {
         
         const nonWolves = alivePlayers.length - wolves.length;
         
-        if (arsonists.length > 0 && villagers.length === 0 && wolves.length === 0) {
+        if (arsonists.length > 0 && wolves.length === 0 && arsonists.length >= villagers.length) {
             this.state = 'GAME_OVER';
             this.updateClientState();
             this.broadcastSystemMessage('Arsonist đã thiêu rụi cả làng! Arsonist Thắng!');

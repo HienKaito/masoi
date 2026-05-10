@@ -11,6 +11,7 @@ let pendingActionType = null;
 let nightActionMode = null; // role name when it's your turn at night
 let currentDayVotes = [];
 let currentWerewolfVotes = [];
+let lastPhaseState = null;
 
 // WebRTC Voice Chat State
 let localStream = null;
@@ -106,7 +107,16 @@ const audioManager = {
         day: ['sounds/day1.mp3', 'sounds/day2.mp3', 'sounds/day3.mp3'],
         night: ['sounds/night1.mp3', 'sounds/night2.mp3', 'sounds/night3.mp3']
     },
+    sfxFiles: {
+        daybreak: ['sounds/rooster.mp3', 'sounds/chicken.mp3', 'sounds/daybreak.mp3'],
+        nightfall: ['sounds/wolf-howl.mp3', 'sounds/wolf.mp3', 'sounds/howl.mp3', 'sounds/nightfall.mp3']
+    },
+    sfxVolumes: {
+        daybreak: 0.2,
+        nightfall: 0.9
+    },
     audioElements: {},
+    sfxElements: {},
 
     init() {
         for (const [key, files] of Object.entries(this.trackFiles)) {
@@ -114,6 +124,14 @@ const audioManager = {
                 const audio = new Audio(file);
                 audio.loop = true;
                 audio.volume = this.volumes[key] || 0.5;
+                return audio;
+            });
+        }
+        for (const [key, files] of Object.entries(this.sfxFiles)) {
+            this.sfxElements[key] = files.map(file => {
+                const audio = new Audio(file);
+                audio.loop = false;
+                audio.volume = this.sfxVolumes[key] || 0.9;
                 return audio;
             });
         }
@@ -150,6 +168,22 @@ const audioManager = {
 
         this.currentTrack = nextTrack;
         this.currentTrack.play().catch(e => console.log('Auto-play prevented:', e));
+    },
+
+    playSfx(sfxType) {
+        if (this.isMuted) return;
+        const sounds = this.sfxElements[sfxType];
+        if (!sounds || sounds.length === 0) return;
+
+        const playCandidate = (index) => {
+            const sound = sounds[index];
+            if (!sound) return;
+
+            sound.currentTime = 0;
+            sound.play().catch(() => playCandidate(index + 1));
+        };
+
+        playCandidate(0);
     }
 };
 
@@ -763,6 +797,7 @@ socket.on('error', (msg) => {
 
 // Socket Events - Game
 socket.on('gameStateUpdate', (gameState) => {
+    const previousPhaseState = lastPhaseState;
     currentGameState = gameState;
     if (gameState.player) {
         myPlayerInfo = gameState.player;
@@ -795,6 +830,9 @@ socket.on('gameStateUpdate', (gameState) => {
     // Update Phase Indicator & Theme
     if (gameState.state === 'NIGHT') {
         audioManager.play('night');
+        if (previousPhaseState !== 'NIGHT') {
+            audioManager.playSfx('nightfall');
+        }
         phaseIndicator.textContent = `Đêm ${gameState.dayNumber}`;
         document.body.className = 'phase-night';
         // Hide/Show werewolf chat tab
@@ -803,6 +841,9 @@ socket.on('gameStateUpdate', (gameState) => {
         }
     } else if (gameState.state === 'DAY') {
         audioManager.play('day');
+        if (previousPhaseState === 'NIGHT') {
+            audioManager.playSfx('daybreak');
+        }
         phaseIndicator.textContent = `Thảo Luận Ngày ${gameState.dayNumber}`;
         document.body.className = 'phase-day';
     } else if (gameState.state === 'VOTE') {
@@ -816,6 +857,7 @@ socket.on('gameStateUpdate', (gameState) => {
 
     updateAudioMutes();
     renderPlayersGrid(gameState.players);
+    lastPhaseState = gameState.state;
 });
 
 const legacyRoleTranslations = {

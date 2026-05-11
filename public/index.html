@@ -248,6 +248,39 @@
                                             <button type="button" class="stepper-btn plus" data-input="count-avenger">+</button>
                                         </div>
                                     </div>
+                                    <div class="role-item" title="Ban ngày tự lộ vai trò để phiếu treo cổ được tính x2 trong phần còn lại của ván">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🏛️</span>
+                                            <span>Thị Trưởng</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-mayor">−</button>
+                                            <input type="number" id="count-mayor" min="0" max="10" value="0" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-mayor">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="Ban ngày chọn 1 người để giam đêm kế tiếp. Ban đêm chat ẩn danh và có 1 viên đạn xử tử người bị giam">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🔒</span>
+                                            <span>Giám Ngục</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-jailer">−</button>
+                                            <input type="number" id="count-jailer" min="0" max="10" value="0" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-jailer">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="role-item" title="Ban đêm nói chuyện ẩn danh với người chết và xem chat hồn ma trong đêm">
+                                        <div class="role-info">
+                                            <span class="toggle-icon">🕯️</span>
+                                            <span>Đồng Cốt</span>
+                                        </div>
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn minus" data-input="count-medium">−</button>
+                                            <input type="number" id="count-medium" min="0" max="10" value="0" readonly>
+                                            <button type="button" class="stepper-btn plus" data-input="count-medium">+</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -415,6 +448,10 @@
                             id="werewolf-tab">
                             🐺 Bầy Sói
                         </button>
+                        <button class="tab-btn hidden" role="tab" aria-selected="false" data-target="jail-chat"
+                            id="jail-tab">
+                            🔒 Nhà Giam
+                        </button>
                         <button class="tab-btn hidden" role="tab" aria-selected="false" data-target="ghost-chat"
                             id="ghost-tab">
                             👻 Hồn Ma
@@ -425,6 +462,7 @@
                     <div class="chat-container" role="tabpanel">
                         <div id="general-chat" class="chat-box" aria-label="Chat chung"></div>
                         <div id="werewolf-chat" class="chat-box hidden" aria-label="Chat bầy sói"></div>
+                        <div id="jail-chat" class="chat-box hidden" aria-label="Chat nhà giam"></div>
                         <div id="ghost-chat" class="chat-box hidden" aria-label="Chat hồn ma"></div>
                     </div>
 

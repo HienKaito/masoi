@@ -97,6 +97,34 @@
             description: 'Phe Dân Làng. Bạn có thể chọn 1 người làm mục tiêu báo thù. Nếu bạn chết sau đêm đầu tiên, người đó sẽ chết cùng bạn.'
         },
         {
+            id: 'MAYOR',
+            settingsKey: 'mayor',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            name: 'Thị Trưởng',
+            color: '#facc15',
+            description: 'Phe Dân Làng. Ban ngày, bạn có thể tự lộ vai trò cho cả làng. Sau khi lộ, phiếu treo cổ của bạn được tính là 2 phiếu trong phần còn lại của ván.'
+        },
+        {
+            id: 'JAILER',
+            settingsKey: 'jailer',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            hasNightAction: true,
+            name: 'Giám Ngục',
+            color: '#64748b',
+            description: 'Phe Dân Làng. Ban ngày, bạn chọn 1 người để giam vào đêm kế tiếp. Ban đêm, bạn nói chuyện ẩn danh với người bị giam. Người bị giam không thể dùng kỹ năng hoặc bị tấn công. Bạn có 1 viên đạn để xử tử người bị giam.'
+        },
+        {
+            id: 'MEDIUM',
+            settingsKey: 'medium',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            name: 'Đồng Cốt',
+            color: '#38bdf8',
+            description: 'Phe Dân Làng. Ban đêm, bạn có thể nói chuyện ẩn danh với người đã chết và xem tin nhắn của chat hồn ma trong đêm.'
+        },
+        {
             id: 'WEREWOLF',
             settingsKey: 'werewolf',
             team: 'WEREWOLF',

@@ -74,6 +74,7 @@ const btnSendWaitingChat = document.getElementById('btn-send-waiting-chat');
 const waitingChat = document.getElementById('waiting-chat');
 const generalChat = document.getElementById('general-chat');
 const werewolfChat = document.getElementById('werewolf-chat');
+const jailChat = document.getElementById('jail-chat');
 const ghostChat = document.getElementById('ghost-chat');
 const tabBtns = document.querySelectorAll('.tab-btn');
 const roleRegistry = window.WerewolfRoles;
@@ -665,6 +666,7 @@ function appendChatMessage(container, data) {
         msgDiv.classList.add('system', `system-${systemTheme}`);
     }
     if (data.isWerewolfChannel) msgDiv.classList.add('werewolf');
+    if (data.isJailChannel) msgDiv.classList.add('jail');
     if (data.isGhost) msgDiv.classList.add('ghost');
 
     if (data.isSystem) {
@@ -696,11 +698,16 @@ function appendChatMessage(container, data) {
     }
 }
 
+function getActiveChatTarget() {
+    const activeTab = document.querySelector('.tab-btn.active');
+    return activeTab?.dataset?.target || 'general-chat';
+}
+
 function sendRoomChatMessage(inputEl) {
     if (!inputEl) return;
     const msg = inputEl.value.trim();
     if (msg && currentRoomCode) {
-        socket.emit('sendMessage', { roomCode: currentRoomCode, message: msg });
+        socket.emit('sendMessage', { roomCode: currentRoomCode, message: msg, channel: getActiveChatTarget() });
         inputEl.value = '';
     }
 }
@@ -838,11 +845,33 @@ function switchChatTab(targetId) {
     const targetBtn = document.querySelector(`.tab-btn[data-target="${targetId}"]`);
     if (targetBtn) targetBtn.classList.add('active');
 
-    [generalChat, werewolfChat, ghostChat].forEach(box => {
+    [generalChat, werewolfChat, jailChat, ghostChat].forEach(box => {
         if (box) box.classList.add('hidden');
     });
     const targetBox = document.getElementById(targetId);
     if (targetBox) targetBox.classList.remove('hidden');
+}
+
+function setChatTabVisible(tabId, visible) {
+    const tab = document.getElementById(tabId);
+    if (tab) tab.classList.toggle('hidden', !visible);
+}
+
+function updateSpecialChatTabs() {
+    const isNight = currentGameState?.state === 'NIGHT';
+    const amAlive = myPlayerInfo?.isAlive !== false;
+    const canUseWolfChat = isNight && amAlive && isWolfTeamMember(myPlayerInfo) && !myPlayerInfo?.isJailedTonight;
+    const canUseJailChat = isNight && amAlive && !!(myPlayerInfo?.jailerJailedTargetId || myPlayerInfo?.isJailedTonight);
+    const canUseGhostChat = !amAlive || (isNight && myPlayerInfo?.role === 'MEDIUM' && !myPlayerInfo?.isJailedTonight);
+
+    setChatTabVisible('werewolf-tab', canUseWolfChat);
+    setChatTabVisible('jail-tab', canUseJailChat);
+    setChatTabVisible('ghost-tab', canUseGhostChat);
+
+    const activeTab = document.querySelector('.tab-btn.active');
+    if (activeTab && activeTab.classList.contains('hidden')) {
+        switchChatTab('general-chat');
+    }
 }
 
 function showLobbyChat() {
@@ -1068,6 +1097,7 @@ socket.on('gameStateUpdate', (gameState) => {
         phaseIndicator.textContent = 'Lộ Diện';
     }
 
+    updateSpecialChatTabs();
     updateAudioMutes();
     renderPlayersGrid(gameState.players);
     lastPhaseState = gameState.state;
@@ -1228,8 +1258,10 @@ socket.on('systemMessage', (msg) => {
 
 socket.on('werewolfInfo', (names) => {
     appendChatMessage(werewolfChat, { isSystem: true, systemTheme: 'mystic', message: `Bầy sói đêm nay: ${names}` });
-    document.getElementById('werewolf-tab').classList.remove('hidden');
-    switchChatTab('werewolf-chat');
+    if (myPlayerInfo && isWolfTeamMember(myPlayerInfo) && !myPlayerInfo.isJailedTonight) {
+        document.getElementById('werewolf-tab').classList.remove('hidden');
+        switchChatTab('werewolf-chat');
+    }
 });
 
 // yourTurn: Server tells this client it's their turn to act
@@ -1263,6 +1295,11 @@ socket.on('yourTurn', ({ role }) => {
             showNotification(`⏱ Lượt của bạn (${rName})! Chọn người để bảo vệ đêm nay.`);
         } else if (role === 'AVENGER') {
             showNotification(`⏱ Lượt của bạn (${rName})! Chọn mục tiêu báo thù.`);
+        } else if (role === 'JAILER') {
+            showNotification(myPlayerInfo?.jailerBullet
+                ? `⏱ Lượt của bạn (${rName})! Bạn có thể xử tử người đang bị giam trong đêm nay.`
+                : `⏱ Lượt của bạn (${rName})! Bạn có thể nói chuyện với người đang bị giam trong tab Nhà Giam.`);
+            switchChatTab('jail-chat');
         } else {
             showNotification(`⏱ Lượt của bạn (${rName})! Chọn mục tiêu bằng cách nhấn vào thẻ bài (30s).`);
         }
@@ -1296,6 +1333,8 @@ socket.on('chatMessage', (data) => {
 
     let container = generalChat;
     if (data.isWerewolfChannel) container = werewolfChat;
+    else if (data.isJailChannel) container = jailChat;
+    else if (data.isGhost || data.isMediumChannel) container = ghostChat;
 
     appendChatMessage(container, data);
 
@@ -1423,10 +1462,12 @@ socket.on('gameReset', () => {
     myRoleDisplay.style.color = 'var(--text-main)';
     myRoleDisplay.style.borderColor = 'var(--text-main)';
     document.getElementById('werewolf-tab').classList.add('hidden');
+    document.getElementById('jail-tab').classList.add('hidden');
     document.getElementById('ghost-tab').classList.add('hidden');
     showLobbyChat();
     generalChat.innerHTML = '';
     werewolfChat.innerHTML = '';
+    jailChat.innerHTML = '';
     ghostChat.innerHTML = '';
     document.getElementById('win-screen').classList.add('hidden');
     switchScreen('waiting');
@@ -1510,7 +1551,7 @@ function renderPlayersGrid(players) {
     if (currentGameState && currentGameState.state === 'VOTE') {
         currentDayVotes.forEach(vote => {
             if (!vote.targetId) return;
-            voteCountByTarget.set(vote.targetId, (voteCountByTarget.get(vote.targetId) || 0) + 1);
+            voteCountByTarget.set(vote.targetId, (voteCountByTarget.get(vote.targetId) || 0) + (vote.voteWeight || 1));
         });
     }
 
@@ -1698,6 +1739,28 @@ function renderPlayersGrid(players) {
             div.appendChild(avengerBadge);
         }
 
+        if (myPlayerInfo && myPlayerInfo.role === 'JAILER' && (myPlayerInfo.jailerSelectedTargetId === p.id || myPlayerInfo.jailerJailedTargetId === p.id)) {
+            const jailerBadge = document.createElement('div');
+            jailerBadge.innerHTML = '🔒';
+            jailerBadge.style.position = 'absolute';
+            jailerBadge.style.top = '5px';
+            jailerBadge.style.left = '5px';
+            jailerBadge.style.fontSize = '1.2rem';
+            jailerBadge.title = myPlayerInfo.jailerJailedTargetId === p.id ? 'Đang bị bạn giam đêm nay' : 'Sẽ bị giam đêm tới';
+            div.appendChild(jailerBadge);
+        }
+
+        if (myPlayerInfo && myPlayerInfo.isJailedTonight && p.id === socket.id) {
+            const jailedBadge = document.createElement('div');
+            jailedBadge.innerHTML = '🔒';
+            jailedBadge.style.position = 'absolute';
+            jailedBadge.style.top = '5px';
+            jailedBadge.style.left = '5px';
+            jailedBadge.style.fontSize = '1.2rem';
+            jailedBadge.title = 'Bạn đang bị giam';
+            div.appendChild(jailedBadge);
+        }
+
         if (myPlayerInfo && myPlayerInfo.role === 'NIGHTMARE_WEREWOLF' && (myPlayerInfo.sleepingPlayerId === p.id || myPlayerInfo.sleptThisNightId === p.id)) {
             const sleepBadge = document.createElement('div');
             sleepBadge.innerHTML = '💤';
@@ -1755,7 +1818,8 @@ function renderPlayersGrid(players) {
                 'RED_LADY_VISIT': 'targeted-visit',
                 'LOUDMOUTH_SELECT': 'targeted-reveal',
                 'MAID_PROTECT': 'targeted-heal',
-                'AVENGER_SELECT': 'targeted-avenge'
+                'AVENGER_SELECT': 'targeted-avenge',
+                'JAILER_EXECUTE': 'targeted-jail'
             };
 
             if (p.id === socket.id) {
@@ -1843,6 +1907,10 @@ function renderPlayersGrid(players) {
                     canTarget = true; actionType = 'AVENGER_SELECT';
                     div.title = "Nhấn để chọn mục tiêu báo thù";
                     if (myPlayerInfo.avengerTargetId === p.id || p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                } else if (role === 'JAILER' && myPlayerInfo.role === 'JAILER' && myPlayerInfo.jailerJailedTargetId === p.id && myPlayerInfo.jailerBullet) {
+                    canTarget = true; actionType = 'JAILER_EXECUTE';
+                    div.title = "Nhấn để xử tử người đang bị giam";
+                    if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
                 } else if (role === 'WITCH' && nightActionMode === 'WITCH') {
                     canTarget = true; actionType = 'WITCH_TARGET';
                     div.title = "Nhấn chọn làm mục tiêu dùng bình";
@@ -1960,6 +2028,16 @@ function renderPlayersGrid(players) {
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AVENGER_SELECT', targetId: p.id });
                                     showNotification(`Đã chọn ${displayName} làm mục tiêu báo thù.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        } else if (actionType === 'JAILER_EXECUTE') {
+                            roleChoices.push({
+                                label: 'Xử tử',
+                                danger: true,
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'JAILER_EXECUTE', targetId: p.id });
+                                    showNotification(`Đã quyết định xử tử ${displayName}.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -2084,7 +2162,7 @@ function renderPlayersGrid(players) {
                         return;
                     }
 
-                    if (['RED_LADY_VISIT', 'LOUDMOUTH_SELECT', 'MAID_PROTECT', 'AVENGER_SELECT'].includes(actionType)) {
+                    if (['RED_LADY_VISIT', 'LOUDMOUTH_SELECT', 'MAID_PROTECT', 'AVENGER_SELECT', 'JAILER_EXECUTE'].includes(actionType)) {
                         actionTargetId = p.id;
                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
                         if (!shouldKeepNightActionOpen()) nightActionMode = null;
@@ -2093,7 +2171,8 @@ function renderPlayersGrid(players) {
                             RED_LADY_VISIT: `Đã chọn ghé thăm ${displayName}.`,
                             LOUDMOUTH_SELECT: `Đã chọn ${displayName}.`,
                             MAID_PROTECT: `Đã chọn bảo vệ ${displayName}.`,
-                            AVENGER_SELECT: `Đã chọn ${displayName} làm mục tiêu báo thù.`
+                            AVENGER_SELECT: `Đã chọn ${displayName} làm mục tiêu báo thù.`,
+                            JAILER_EXECUTE: `Đã quyết định xử tử ${displayName}.`
                         };
                         showNotification(messages[actionType] || 'Đã chọn mục tiêu.');
                         renderPlayersGrid(currentGameState.players);
@@ -2131,6 +2210,23 @@ function renderPlayersGrid(players) {
         }
 
         // --- DAY ACTIONS ---
+        if ((currentGameState?.state === 'DAY' || currentGameState?.state === 'VOTE') && myPlayerInfo && myPlayerInfo.role === 'MAYOR' && myPlayerInfo.isAlive && p.id === socket.id && !myPlayerInfo.publiclyRevealedRole) {
+            div.classList.add('clickable', 'targeted-mayor');
+            div.title = 'Nhấn để lộ vai trò Thị Trưởng và nhận phiếu x2';
+            div.addEventListener('click', () => {
+                openChoiceModal('Thị Trưởng', 'Bạn có muốn lộ vai trò cho cả làng để phiếu treo cổ được tính x2 không?', [
+                    {
+                        label: 'Lộ vai trò',
+                        onClick: () => {
+                            socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'MAYOR_REVEAL', targetId: socket.id });
+                            showNotification('Đã lộ vai trò Thị Trưởng.');
+                        }
+                    },
+                    { label: 'Đóng' }
+                ]);
+            });
+        }
+
         if (currentGameState && currentGameState.state === 'DAY' && myPlayerInfo && myPlayerInfo.isAlive && p.isAlive && p.id !== socket.id) {
             let canTarget = false;
             let actionType = null;
@@ -2143,6 +2239,9 @@ function renderPlayersGrid(players) {
             } else if (myPlayerInfo.role === 'AVENGER') {
                 canTarget = true; actionType = 'AVENGER_SELECT';
                 if (myPlayerInfo.avengerTargetId === p.id) div.classList.add('targeted-avenge');
+            } else if (myPlayerInfo.role === 'JAILER') {
+                canTarget = true; actionType = 'JAILER_SELECT';
+                if (myPlayerInfo.jailerSelectedTargetId === p.id) div.classList.add('targeted-jail');
             }
 
             if (canTarget) {
@@ -2151,11 +2250,18 @@ function renderPlayersGrid(players) {
                     ? 'Nhấn để ru ngủ (chỉ 2 lần/game)'
                     : actionType === 'AVENGER_SELECT'
                         ? 'Nhấn để chọn mục tiêu báo thù'
-                        : 'Nhấn để tạt nước thánh (chỉ 1 lần/game)';
+                        : actionType === 'JAILER_SELECT'
+                            ? 'Nhấn để chọn người sẽ bị giam đêm tới'
+                            : 'Nhấn để tạt nước thánh (chỉ 1 lần/game)';
                 div.addEventListener('click', () => {
                     if (actionType === 'AVENGER_SELECT') {
                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
                         showNotification(`Đã chọn ${displayName} làm mục tiêu báo thù.`);
+                        return;
+                    }
+                    if (actionType === 'JAILER_SELECT') {
+                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
+                        showNotification(`Đã chọn ${displayName} để giam đêm tới.`);
                         return;
                     }
 
@@ -2178,6 +2284,9 @@ function renderPlayersGrid(players) {
             if (myVote && myVote.targetId === p.id) {
                 div.classList.add('targeted-vote');
             }
+            if (myPlayerInfo && myPlayerInfo.role === 'JAILER' && myPlayerInfo.jailerSelectedTargetId === p.id) {
+                div.classList.add('targeted-jail');
+            }
 
             div.addEventListener('click', () => {
                 if (myPlayerInfo && myPlayerInfo.role === 'AVENGER') {
@@ -2196,6 +2305,28 @@ function renderPlayersGrid(players) {
                             onClick: () => {
                                 socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AVENGER_SELECT', targetId: p.id });
                                 showNotification(`Đã chọn ${displayName} làm mục tiêu báo thù.`);
+                            }
+                        },
+                        { label: 'Đóng' }
+                    ]);
+                    return;
+                }
+                if (myPlayerInfo && myPlayerInfo.role === 'JAILER') {
+                    const myVote = currentDayVotes.find(v => v.voterId === socket.id);
+                    const hasVote = myVote && myVote.targetId === p.id;
+                    openChoiceModal('Giám Ngục', `Chọn hành động với ${displayName}.`, [
+                        {
+                            label: hasVote ? 'Bỏ phiếu treo' : 'Bỏ phiếu',
+                            danger: true,
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'VOTE', targetId: p.id });
+                            }
+                        },
+                        {
+                            label: 'Giam đêm tới',
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'JAILER_SELECT', targetId: p.id });
+                                showNotification(`Đã chọn ${displayName} để giam đêm tới.`);
                             }
                         },
                         { label: 'Đóng' }

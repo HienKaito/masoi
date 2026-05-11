@@ -79,10 +79,10 @@ io.on('connection', (socket) => {
     });
 
     // Chat handling
-    socket.on('sendMessage', ({ roomCode, message }) => {
+    socket.on('sendMessage', ({ roomCode, message, channel }) => {
         const game = games[roomCode];
         if (game) {
-            game.handleChat(socket.id, message);
+            game.handleChat(socket.id, message, channel);
         }
     });
 

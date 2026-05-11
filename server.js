@@ -25,19 +25,19 @@ const games = {};
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
-    socket.on('createRoom', ({ playerName }) => {
+    socket.on('createRoom', ({ playerName, avatarUrl }) => {
         // Generate a random 4-letter room code
         const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
         games[roomCode] = new GameLogic(roomCode, io);
 
         socket.join(roomCode);
-        const player = games[roomCode].addPlayer(socket.id, playerName, true);
+        const player = games[roomCode].addPlayer(socket.id, playerName, true, avatarUrl);
 
         socket.emit('roomCreated', { roomCode, player });
         io.to(roomCode).emit('updatePlayers', games[roomCode].getPlayers());
     });
 
-    socket.on('joinRoom', ({ roomCode, playerName }) => {
+    socket.on('joinRoom', ({ roomCode, playerName, avatarUrl }) => {
         const code = roomCode.toUpperCase();
         if (games[code]) {
             if (games[code].state !== 'LOBBY') {
@@ -45,7 +45,7 @@ io.on('connection', (socket) => {
                 return;
             }
             socket.join(code);
-            const player = games[code].addPlayer(socket.id, playerName, false);
+            const player = games[code].addPlayer(socket.id, playerName, false, avatarUrl);
             socket.emit('roomJoined', { roomCode: code, player });
             if (games[code].settings) {
                 socket.emit('settingsUpdated', games[code].settings);

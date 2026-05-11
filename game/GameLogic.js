@@ -3,6 +3,20 @@ const RoleRegistry = require('../shared/roleRegistry');
 const EVIL_ROLES = RoleRegistry.evilRoleIds;
 const GOOD_ROLES = RoleRegistry.goodRoleIds;
 
+function sanitizeAvatarUrl(url) {
+    if (typeof url !== 'string') return null;
+    const trimmed = url.trim();
+    if (!trimmed) return null;
+
+    try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+        return trimmed;
+    } catch {
+        return null;
+    }
+}
+
 class GameLogic {
     constructor(roomCode, io) {
         this.roomCode = roomCode;
@@ -89,11 +103,12 @@ class GameLogic {
         return !!this.getJailerIdForJailedTarget(socketId);
     }
 
-    addPlayer(socketId, name, isHost) {
+    addPlayer(socketId, name, isHost, avatarUrl = null) {
         this.players[socketId] = {
             id: socketId,
             playerIndex: this.nextPlayerIndex++,
             name: name,
+            avatarUrl: sanitizeAvatarUrl(avatarUrl),
             isHost: isHost,
             role: null,
             isWolfAligned: false,
@@ -149,6 +164,7 @@ class GameLogic {
                 id: p.id,
                 playerIndex: p.playerIndex,
                 name: p.name,
+                avatarUrl: p.avatarUrl || null,
                 isHost: p.isHost,
                 isAlive: p.isAlive,
                 role: (reveal || (forPlayer && forPlayer.seenRoles && forPlayer.seenRoles[p.id])) ? p.role : null,
@@ -1128,6 +1144,7 @@ class GameLogic {
     revealAllRoles(winnerTeam) {
         const allRoles = Object.values(this.players).map(p => ({
             name: p.name,
+            avatarUrl: p.avatarUrl || null,
             role: p.role
         }));
         this.io.to(this.roomCode).emit('gameOver', {
@@ -1201,6 +1218,7 @@ class GameLogic {
         const chatMsg = {
             senderId: socketId,
             sender: player.name,
+            avatarUrl: player.avatarUrl || null,
             message: message,
             isGhost: !player.isAlive,
             isWerewolfChannel: false

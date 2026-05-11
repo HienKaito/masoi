@@ -50,6 +50,7 @@ const screens = {
 
 // DOM Elements - Inputs/Buttons
 const playerNameInput = document.getElementById('player-name');
+const playerAvatarUrlInput = document.getElementById('player-avatar-url');
 const btnEnter = document.getElementById('btn-enter');
 const btnCreateRoom = document.getElementById('btn-create-room');
 const roomCodeInput = document.getElementById('room-code-input');
@@ -93,6 +94,41 @@ const btnConfirmAction = document.getElementById('btn-confirm-action');
 // Helper Functions
 function getAvatarUrl(name) {
     return `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(name)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffdfbf,ffd5dc&radius=50`;
+}
+
+function getValidAvatarUrl(url) {
+    if (typeof url !== 'string') return null;
+    const trimmed = url.trim();
+    if (!trimmed) return null;
+
+    try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+        return trimmed;
+    } catch {
+        return null;
+    }
+}
+
+function getSelectedAvatarUrl() {
+    return getValidAvatarUrl(playerAvatarUrlInput ? playerAvatarUrlInput.value : '');
+}
+
+function getPlayerAvatarUrl(playerOrName) {
+    if (typeof playerOrName === 'object' && playerOrName !== null) {
+        return getValidAvatarUrl(playerOrName.avatarUrl) || getAvatarUrl(playerOrName.name || 'unknown');
+    }
+    return getAvatarUrl(playerOrName || 'unknown');
+}
+
+function attachAvatarFallback(img, playerOrName) {
+    if (!img) return;
+    img.onerror = () => {
+        img.onerror = null;
+        img.src = typeof playerOrName === 'object'
+            ? getAvatarUrl(playerOrName?.name || 'unknown')
+            : getAvatarUrl(playerOrName || 'unknown');
+    };
 }
 
 function getAnonymousAvatarUrl() {
@@ -149,9 +185,13 @@ function getChatSenderIdentity(data) {
         }
     }
 
+    const player = data.senderId && currentGameState?.players
+        ? currentGameState.players.find(p => p.id === data.senderId)
+        : null;
+
     return {
         name: data.sender || 'Không rõ',
-        avatarUrl: getAvatarUrl(data.sender || 'unknown')
+        avatarUrl: getValidAvatarUrl(data.avatarUrl) || (player ? getPlayerAvatarUrl(player) : getAvatarUrl(data.sender || 'unknown'))
     };
 }
 
@@ -680,6 +720,7 @@ function appendChatMessage(container, data) {
         avatarImg.src = senderIdentity.avatarUrl;
         avatarImg.className = 'chat-avatar';
         avatarImg.alt = senderIdentity.name;
+        attachAvatarFallback(avatarImg, senderIdentity.name);
 
         const senderSpan = document.createElement('span');
         senderSpan.className = 'sender';
@@ -715,6 +756,11 @@ function sendRoomChatMessage(inputEl) {
 // Event Listeners - UI
 btnEnter.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
+    const avatarText = playerAvatarUrlInput ? playerAvatarUrlInput.value.trim() : '';
+    if (avatarText && !getValidAvatarUrl(avatarText)) {
+        showNotification('URL avatar phải là link http/https hợp lệ.');
+        return;
+    }
     if (name) {
         audioManager.play('lobby'); // Bắt đầu phát nhạc chờ
         switchScreen('lobby');
@@ -725,14 +771,20 @@ btnEnter.addEventListener('click', () => {
 
 btnCreateRoom.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
-    socket.emit('createRoom', { playerName: name });
+    const avatarUrl = getSelectedAvatarUrl();
+    const avatarText = playerAvatarUrlInput ? playerAvatarUrlInput.value.trim() : '';
+    if (avatarText && !avatarUrl) return showNotification('URL avatar phải là link http/https hợp lệ.');
+    socket.emit('createRoom', { playerName: name, avatarUrl });
 });
 
 btnJoinRoom.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
     const code = roomCodeInput.value.trim();
+    const avatarUrl = getSelectedAvatarUrl();
+    const avatarText = playerAvatarUrlInput ? playerAvatarUrlInput.value.trim() : '';
+    if (avatarText && !avatarUrl) return showNotification('URL avatar phải là link http/https hợp lệ.');
     if (code.length === 4) {
-        socket.emit('joinRoom', { roomCode: code, playerName: name });
+        socket.emit('joinRoom', { roomCode: code, playerName: name, avatarUrl });
     } else {
         showNotification('Vui lòng nhập mã 4 chữ cái hợp lệ.');
     }
@@ -991,8 +1043,9 @@ socket.on('updatePlayers', (players) => {
 
         const img = document.createElement('img');
         img.id = `avatar-lobby-${p.id}`;
-        img.src = getAvatarUrl(p.name);
+        img.src = getPlayerAvatarUrl(p);
         img.className = 'player-avatar-small';
+        attachAvatarFallback(img, p);
 
         const span = document.createElement('span');
         span.textContent = `${idx + 1}. ${p.name}${p.isHost ? ' 👑' : ''}`;
@@ -1424,11 +1477,26 @@ socket.on('gameOver', ({ winnerTeam, roles, actionLog = [] }) => {
         const item = document.createElement('div');
         item.className = 'win-player-item';
         item.style.animationDelay = `${idx * 0.1}s`;
-        item.innerHTML = `
-            <img src="${getAvatarUrl(r.name)}" style="width:40px;height:40px;border-radius:50%;border:2px solid var(--border)">
-            <strong style="font-size:0.9rem">${r.name}</strong>
-            <span class="role-name" style="color:${getRoleColor(r.role)}">${roleTranslations[r.role] || r.role}</span>
-        `;
+        const avatar = document.createElement('img');
+        avatar.src = getPlayerAvatarUrl(r);
+        avatar.style.width = '40px';
+        avatar.style.height = '40px';
+        avatar.style.borderRadius = '50%';
+        avatar.style.border = '2px solid var(--border)';
+        attachAvatarFallback(avatar, r);
+
+        const name = document.createElement('strong');
+        name.style.fontSize = '0.9rem';
+        name.textContent = r.name;
+
+        const role = document.createElement('span');
+        role.className = 'role-name';
+        role.style.color = getRoleColor(r.role);
+        role.textContent = roleTranslations[r.role] || r.role;
+
+        item.appendChild(avatar);
+        item.appendChild(name);
+        item.appendChild(role);
         winPlayersList.appendChild(item);
     });
 
@@ -1577,9 +1645,10 @@ function renderPlayersGrid(players) {
         // Avatar
         const img = document.createElement('img');
         img.id = `avatar-game-${p.id}`;
-        img.src = isAnonymousMatchEnabled() ? getAnonymousAvatarUrl() : getAvatarUrl(p.name);
+        img.src = isAnonymousMatchEnabled() ? getAnonymousAvatarUrl() : getPlayerAvatarUrl(p);
         img.className = 'player-avatar';
         img.alt = displayName;
+        attachAvatarFallback(img, p);
 
         // Name + role label
         const infoDiv = document.createElement('div');

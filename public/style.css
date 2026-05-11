@@ -84,7 +84,7 @@ h3 { font-size: clamp(1rem, 2.5vw, 1.3rem); }
 }
 
 /* ===== INPUTS ===== */
-input[type="text"], input[type="number"] {
+input[type="text"], input[type="url"], input[type="number"] {
     width: 100%; padding: 0.85rem 1.1rem;
     background: rgba(255,255,255,0.04);
     border: 1px solid var(--border);
@@ -92,7 +92,7 @@ input[type="text"], input[type="number"] {
     border-radius: var(--radius-sm); outline: none;
     transition: border-color 0.25s, box-shadow 0.25s;
 }
-input[type="text"]:focus, input[type="number"]:focus {
+input[type="text"]:focus, input[type="url"]:focus, input[type="number"]:focus {
     border-color: var(--highlight);
     box-shadow: 0 0 0 3px rgba(102,252,241,0.12);
 }
@@ -934,6 +934,7 @@ h1, h2, h3 {
 }
 
 input[type="text"],
+input[type="url"],
 input[type="number"],
 .chat-input-area input {
     background: #11161c;
@@ -943,6 +944,7 @@ input[type="number"],
 }
 
 input[type="text"]:focus,
+input[type="url"]:focus,
 input[type="number"]:focus,
 .chat-input-area input:focus {
     border-color: var(--accent);

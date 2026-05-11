@@ -287,10 +287,48 @@ input[type="number"] { width: 70px; text-align: center; padding: 0.5rem; }
 }
 .my-role-panel { text-align: center; }
 .role-card {
-    font-family: var(--font-title); font-size: 1.1rem;
-    color: var(--highlight); margin-top: 0.75rem; padding: 0.9rem;
-    background: rgba(0,0,0,0.5); border-radius: var(--radius-sm);
-    border: 1px solid var(--highlight); line-height: 1.6;
+    color: var(--highlight);
+    margin-top: 0.75rem;
+    padding: 0.9rem;
+    background: rgba(0,0,0,0.5);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--highlight);
+    line-height: 1.45;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    text-align: left;
+}
+
+.role-card-name {
+    font-family: var(--font-title);
+    font-size: 1.2rem;
+    line-height: 1.15;
+    text-align: center;
+}
+
+.role-card-desc {
+    margin: 0;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 0.86rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1.55;
+    opacity: 0.96;
+}
+
+.role-card-note {
+    margin: 0;
+    padding: 0.6rem 0.7rem;
+    color: #fecaca;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    border-radius: 8px;
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.4;
 }
 
 /* ── Center arena ── */
@@ -377,6 +415,27 @@ input[type="number"] { width: 70px; text-align: center; padding: 0.5rem; }
 }
 .player-card.clickable:hover .player-avatar { border-color: var(--highlight); }
 .player-card.targeted .player-avatar { border-color: var(--danger); }
+
+.death-cause {
+    display: block;
+    margin-top: 0.2rem;
+    color: #fca5a5;
+    font-size: 0.62rem;
+    line-height: 1.15;
+}
+
+.doctor-saved-label {
+    display: inline-block;
+    margin-top: 0.22rem;
+    padding: 2px 5px;
+    border-radius: 6px;
+    border: 1px solid rgba(74, 222, 128, 0.55);
+    color: #bbf7d0;
+    background: rgba(22, 101, 52, 0.42);
+    font-size: 0.58rem;
+    line-height: 1.1;
+    white-space: normal;
+}
 
 /* Chat bubble on player card */
 .chat-bubble {
@@ -674,6 +733,30 @@ body.phase-day #phase-indicator { color: #fbbf24; }
     order: 3;
     flex: 1.5;
     min-width: 320px;
+    max-height: min(620px, calc(100vh - 210px));
+    overflow: hidden;
+    min-height: 0;
+}
+.game-settings {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 0.35rem;
+}
+.game-settings::-webkit-scrollbar {
+    width: 8px;
+}
+.game-settings::-webkit-scrollbar-track {
+    background: rgba(255,255,255,0.04);
+    border-radius: 999px;
+}
+.game-settings::-webkit-scrollbar-thumb {
+    background: rgba(102,252,241,0.32);
+    border-radius: 999px;
+}
+.game-settings::-webkit-scrollbar-thumb:hover {
+    background: rgba(102,252,241,0.48);
 }
 .panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border); }
 .badge {
@@ -1005,6 +1088,31 @@ input[type="number"]:focus,
     animation: none;
 }
 
+.player-card.doctor-saved {
+    border-color: #22c55e;
+    background: rgba(20, 83, 45, 0.32);
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.26), 0 0 24px rgba(34, 197, 94, 0.42);
+    animation: doctor-saved-pulse 1.4s ease-in-out infinite;
+}
+
+.player-card.doctor-saved::after {
+    content: '🛡️';
+    position: absolute;
+    top: -14px;
+    right: -12px;
+    font-size: 1.55rem;
+    filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.65));
+}
+
+@keyframes doctor-saved-pulse {
+    0%, 100% {
+        box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.24), 0 0 18px rgba(34, 197, 94, 0.32);
+    }
+    50% {
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.42), 0 0 30px rgba(34, 197, 94, 0.58);
+    }
+}
+
 .vote-count-badge {
     position: absolute;
     top: -12px;
@@ -1260,6 +1368,7 @@ input[type="number"]:focus,
         order: 3;
         width: 100%;
         min-width: 0;
+        max-height: 72vh;
     }
 
     .lobby-chat-panel.chat-section {
@@ -1270,6 +1379,10 @@ input[type="number"]:focus,
 
     .host-controls {
         order: 3;
+    }
+
+    .game-settings {
+        max-height: calc(72vh - 96px);
     }
 
     .players-list-container,
@@ -1289,6 +1402,28 @@ input[type="number"]:focus,
 
     .sidebar {
         order: 1;
+    }
+
+    .my-role-panel {
+        text-align: left;
+    }
+
+    .my-role-panel h3 {
+        text-align: center;
+    }
+
+    .role-card {
+        padding: 1rem;
+        gap: 0.75rem;
+    }
+
+    .role-card-name {
+        font-size: 1.35rem;
+    }
+
+    .role-card-desc {
+        font-size: 0.95rem;
+        line-height: 1.62;
     }
 
     .arena {
@@ -1352,6 +1487,19 @@ input[type="number"]:focus,
         width: 72px;
     }
 
+    .role-card {
+        padding: 0.9rem;
+    }
+
+    .role-card-name {
+        font-size: 1.25rem;
+    }
+
+    .role-card-desc {
+        font-size: 0.92rem;
+        line-height: 1.58;
+    }
+
     .tab-btn {
         font-size: 0.76rem;
         padding: 0.65rem 0.4rem;
@@ -1401,6 +1549,86 @@ input[type="number"]:focus,
 .win-player-item .role-name {
     font-size: 0.8rem;
     font-weight: 700;
+}
+
+.win-content {
+    max-height: 92vh;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.win-action-log {
+    margin-top: 1rem;
+    text-align: left;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 1rem;
+    max-height: 28vh;
+    overflow-y: auto;
+}
+
+.lobby-action-log-panel {
+    width: min(1220px, 100%);
+    flex: 0 0 auto;
+    min-height: 220px;
+    max-height: 42vh;
+    margin: 0 auto 1rem;
+    background: rgba(15, 17, 26, 0.92);
+    border-color: rgba(102, 252, 241, 0.2);
+}
+
+.lobby-action-log-panel #lobby-action-log {
+    max-height: calc(42vh - 72px);
+    overflow-y: auto;
+    padding-right: 0.35rem;
+}
+
+@media (max-width: 768px) {
+    .lobby-action-log-panel {
+        width: 100%;
+        min-height: 160px;
+        max-height: 36vh;
+        margin-bottom: 0.9rem;
+    }
+
+    .lobby-action-log-panel #lobby-action-log {
+        max-height: calc(36vh - 72px);
+    }
+}
+
+.win-action-log h2 {
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    color: var(--highlight);
+    margin-bottom: 0.75rem;
+}
+
+.win-action-log-group {
+    margin-bottom: 0.85rem;
+}
+
+.win-action-log-group:last-child {
+    margin-bottom: 0;
+}
+
+.win-action-log-group h3 {
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    color: var(--text);
+    margin-bottom: 0.35rem;
+}
+
+.win-action-log-group ol {
+    margin-left: 1.25rem;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
+.win-action-log-empty {
+    color: var(--text-dim);
+    font-size: 0.85rem;
 }
 
 .revealed-role {

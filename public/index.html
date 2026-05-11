@@ -119,6 +119,11 @@
                 </div>
             </header>
 
+            <section id="lobby-action-log-panel" class="win-action-log lobby-action-log-panel hidden" aria-label="Diễn biến ván vừa kết thúc">
+                <h2>Diễn biến ván vừa kết thúc</h2>
+                <div id="lobby-action-log"></div>
+            </section>
+
             <div class="waiting-body">
                 <!-- Danh sách người chơi -->
                 <div class="players-list-container">
@@ -332,6 +337,16 @@
                             <span class="toggle-icon">👁️</span>
                             <span>Hiện vai trò khi chết</span>
                         </label>
+                        <label class="role-toggle full-width">
+                            <input type="checkbox" id="show-death-cause">
+                            <span class="toggle-icon">☠️</span>
+                            <span>Hiện nguyên nhân cái chết</span>
+                        </label>
+                        <label class="role-toggle full-width">
+                            <input type="checkbox" id="anonymous-match">
+                            <span class="toggle-icon">?</span>
+                            <span>Trận đấu ẩn danh</span>
+                        </label>
                     </div>
 
                     <button id="btn-start-game" class="btn primary btn-lg hidden">
@@ -353,6 +368,7 @@
                     </div>
                 </div>
             </div>
+
         </section>
 
         <!-- ══════════════════════════════════════
@@ -459,7 +475,7 @@
                 <div id="win-players-list" class="win-players-grid">
                     <!-- Players and roles will be injected here -->
                 </div>
-                
+
                 <div class="win-footer" style="margin-top: 2rem; color: var(--text-dim); font-size: 0.9rem;">
                     Quay về sảnh sau <span id="win-timer" style="color: var(--highlight); font-weight: bold; font-size: 1.2rem;">10</span> giây...
                 </div>

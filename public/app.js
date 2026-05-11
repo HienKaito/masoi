@@ -12,6 +12,7 @@ let nightActionMode = null; // role name when it's your turn at night
 let currentDayVotes = [];
 let currentWerewolfVotes = [];
 let lastPhaseState = null;
+let lastCompletedActionLog = [];
 
 // WebRTC Voice Chat State
 let localStream = null;
@@ -93,9 +94,71 @@ function getAvatarUrl(name) {
     return `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(name)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffdfbf,ffd5dc&radius=50`;
 }
 
+function getAnonymousAvatarUrl() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+        <rect width="96" height="96" rx="48" fill="#111827"/>
+        <circle cx="48" cy="48" r="43" fill="#1f2937" stroke="#66fcf1" stroke-width="3"/>
+        <text x="48" y="63" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#66fcf1">?</text>
+    </svg>`;
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[char]));
+}
+
+function isAnonymousMatchEnabled() {
+    return currentGameState?.settings?.anonymousMatch === true;
+}
+
+function getPlayerNumberLabel(player, fallbackIndex = null) {
+    const number = fallbackIndex !== null ? fallbackIndex + 1 : player?.playerIndex;
+    return number ? `Người chơi ${number}` : 'Người chơi';
+}
+
+function getPlayerCardName(player, fallbackIndex) {
+    return isAnonymousMatchEnabled()
+        ? `#${fallbackIndex + 1}`
+        : `${fallbackIndex + 1}. ${player?.name || 'Không rõ'}`;
+}
+
+function getPlayerDisplayName(player, fallbackIndex = null) {
+    return isAnonymousMatchEnabled() ? getPlayerNumberLabel(player, fallbackIndex) : (player?.name || 'Không rõ');
+}
+
+function getPlayerDisplayNameById(playerId, players) {
+    const index = players.findIndex(player => player.id === playerId);
+    return getPlayerDisplayName(index >= 0 ? players[index] : null, index >= 0 ? index : null);
+}
+
+function getChatSenderIdentity(data) {
+    if (isAnonymousMatchEnabled() && data.senderId && currentGameState?.players) {
+        const index = currentGameState.players.findIndex(player => player.id === data.senderId);
+        if (index >= 0) {
+            return {
+                name: getPlayerDisplayName(currentGameState.players[index], index),
+                avatarUrl: getAnonymousAvatarUrl()
+            };
+        }
+    }
+
+    return {
+        name: data.sender || 'Không rõ',
+        avatarUrl: getAvatarUrl(data.sender || 'unknown')
+    };
+}
+
 // --- Audio Manager ---
 const audioManager = {
     currentTrack: null,
+    currentTrackType: null,
+    desiredTrackType: null,
     isMuted: false,
     volumes: {
         lobby: 0.05,
@@ -108,8 +171,8 @@ const audioManager = {
         night: ['sounds/night1.mp3', 'sounds/night2.mp3', 'sounds/night3.mp3']
     },
     sfxFiles: {
-        daybreak: ['sounds/rooster.mp3', 'sounds/chicken.mp3', 'sounds/daybreak.mp3'],
-        nightfall: ['sounds/wolf-howl.mp3', 'sounds/wolf.mp3', 'sounds/howl.mp3', 'sounds/nightfall.mp3']
+        daybreak: ['sounds/daybreak.mp3'],
+        nightfall: ['sounds/nightfall.mp3']
     },
     sfxVolumes: {
         daybreak: 0.2,
@@ -117,6 +180,7 @@ const audioManager = {
     },
     audioElements: {},
     sfxElements: {},
+    audioContext: null,
 
     init() {
         for (const [key, files] of Object.entries(this.trackFiles)) {
@@ -143,6 +207,10 @@ const audioManager = {
 
             if (this.isMuted) {
                 if (this.currentTrack) this.currentTrack.pause();
+            } else if (this.desiredTrackType) {
+                const desiredTrackType = this.desiredTrackType;
+                this.currentTrackType = null;
+                this.play(desiredTrackType);
             } else if (this.currentTrack) {
                 this.currentTrack.play().catch(() => { });
             }
@@ -150,9 +218,17 @@ const audioManager = {
     },
 
     play(trackType) {
+        this.desiredTrackType = trackType;
         if (this.isMuted) return;
         const tracks = this.audioElements[trackType];
         if (!tracks || tracks.length === 0) return;
+
+        if (this.currentTrackType === trackType && this.currentTrack) {
+            if (this.currentTrack.paused) {
+                this.currentTrack.play().catch(e => console.log('Auto-play prevented:', e));
+            }
+            return;
+        }
 
         // Pick a random track from the array
         const randomIndex = Math.floor(Math.random() * tracks.length);
@@ -167,6 +243,7 @@ const audioManager = {
         }
 
         this.currentTrack = nextTrack;
+        this.currentTrackType = trackType;
         this.currentTrack.play().catch(e => console.log('Auto-play prevented:', e));
     },
 
@@ -184,6 +261,84 @@ const audioManager = {
         };
 
         playCandidate(0);
+    },
+
+    getAudioContext() {
+        if (!this.audioContext) {
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (this.audioContext.state === 'suspended') {
+            this.audioContext.resume().catch(() => { });
+        }
+        return this.audioContext;
+    },
+
+    playTone({ type = 'sine', frequency = 440, start = 0, duration = 0.2, volume = 0.25, attack = 0.01, release = 0.08, destination = null }) {
+        const ctx = this.getAudioContext();
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const startAt = ctx.currentTime + start;
+        const endAt = startAt + duration;
+
+        oscillator.type = type;
+        oscillator.frequency.setValueAtTime(frequency, startAt);
+        gain.gain.setValueAtTime(0.0001, startAt);
+        gain.gain.exponentialRampToValueAtTime(Math.max(volume, 0.0001), startAt + attack);
+        gain.gain.exponentialRampToValueAtTime(0.0001, endAt + release);
+        oscillator.connect(gain);
+        gain.connect(destination || ctx.destination);
+        oscillator.start(startAt);
+        oscillator.stop(endAt + release + 0.02);
+    },
+
+    playNoise({ start = 0, duration = 0.25, volume = 0.2, filterType = 'lowpass', frequency = 900, release = 0.08 }) {
+        const ctx = this.getAudioContext();
+        const buffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * duration)), ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+
+        for (let i = 0; i < data.length; i++) {
+            data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+        }
+
+        const source = ctx.createBufferSource();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+        const startAt = ctx.currentTime + start;
+
+        filter.type = filterType;
+        filter.frequency.setValueAtTime(frequency, startAt);
+        gain.gain.setValueAtTime(volume, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration + release);
+        source.buffer = buffer;
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+        source.start(startAt);
+        source.stop(startAt + duration + release + 0.02);
+    },
+
+    playRoleSfx(sfxType) {
+        if (this.isMuted) return;
+
+        if (sfxType === 'witchPoison') {
+            this.playNoise({ duration: 0.45, volume: 0.18, filterType: 'bandpass', frequency: 850, release: 0.18 });
+            this.playNoise({ start: 0.08, duration: 0.3, volume: 0.12, filterType: 'highpass', frequency: 1400, release: 0.14 });
+            this.playTone({ type: 'triangle', frequency: 180, start: 0.02, duration: 0.35, volume: 0.08, release: 0.18 });
+        } else if (sfxType === 'doctorProtect' || sfxType === 'maidProtect') {
+            this.playTone({ type: 'sine', frequency: 523.25, duration: 0.28, volume: 0.16, release: 0.12 });
+            this.playTone({ type: 'sine', frequency: 659.25, start: 0.08, duration: 0.32, volume: 0.14, release: 0.16 });
+            this.playTone({ type: 'triangle', frequency: 1046.5, start: 0.16, duration: 0.22, volume: 0.08, release: 0.2 });
+        } else if (sfxType === 'witchHeal') {
+            this.playTone({ type: 'sine', frequency: 392, duration: 0.28, volume: 0.12, release: 0.14 });
+            this.playTone({ type: 'sine', frequency: 587.33, start: 0.1, duration: 0.32, volume: 0.13, release: 0.18 });
+            this.playNoise({ start: 0.05, duration: 0.25, volume: 0.05, filterType: 'highpass', frequency: 2200, release: 0.2 });
+        } else if (sfxType === 'werewolfKill') {
+            this.playTone({ type: 'sawtooth', frequency: 110, duration: 0.25, volume: 0.14, release: 0.12 });
+            this.playNoise({ start: 0.05, duration: 0.22, volume: 0.12, filterType: 'lowpass', frequency: 500, release: 0.1 });
+        } else if (sfxType === 'seerCheck') {
+            this.playTone({ type: 'sine', frequency: 880, duration: 0.18, volume: 0.09, release: 0.16 });
+            this.playTone({ type: 'sine', frequency: 1174.66, start: 0.09, duration: 0.22, volume: 0.08, release: 0.18 });
+        }
     }
 };
 
@@ -427,6 +582,22 @@ function openChoiceModal(title, description, choices) {
     actionModal.classList.remove('hidden');
 }
 
+function confirmDoctorHeal(targetId, displayName) {
+    openChoiceModal('Bác sĩ', `Xác nhận bảo vệ ${displayName} đêm nay?`, [
+        {
+            label: 'Bảo vệ',
+            onClick: () => {
+                actionTargetId = targetId;
+                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'DOCTOR_HEAL', targetId });
+                if (!shouldKeepNightActionOpen()) nightActionMode = null;
+                showNotification(`Đã chọn bảo vệ ${displayName}.`);
+                renderPlayersGrid(currentGameState.players);
+            }
+        },
+        { label: 'Hủy' }
+    ]);
+}
+
 function isNearBottom(container, threshold = 48) {
     const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
     return remaining <= threshold;
@@ -499,16 +670,18 @@ function appendChatMessage(container, data) {
     if (data.isSystem) {
         msgDiv.textContent = data.message;
     } else {
+        const senderIdentity = getChatSenderIdentity(data);
         const headerDiv = document.createElement('div');
         headerDiv.className = 'chat-header';
 
         const avatarImg = document.createElement('img');
-        avatarImg.src = getAvatarUrl(data.sender);
+        avatarImg.src = senderIdentity.avatarUrl;
         avatarImg.className = 'chat-avatar';
+        avatarImg.alt = senderIdentity.name;
 
         const senderSpan = document.createElement('span');
         senderSpan.className = 'sender';
-        senderSpan.textContent = data.sender + ': ';
+        senderSpan.textContent = senderIdentity.name + ': ';
 
         headerDiv.appendChild(avatarImg);
         headerDiv.appendChild(senderSpan);
@@ -567,6 +740,8 @@ function getSettings() {
 
     return {
         revealRoleOnDeath: document.getElementById('reveal-on-death').checked,
+        showDeathCause: document.getElementById('show-death-cause').checked,
+        anonymousMatch: document.getElementById('anonymous-match').checked,
         roles
     };
 }
@@ -584,6 +759,8 @@ function broadcastSettings() {
 
 const settingElements = [
     'reveal-on-death',
+    'show-death-cause',
+    'anonymous-match',
     ...roleSettingsKeys.map(key => `count-${key.replace(/_/g, '-')}`)
 ];
 settingElements.forEach(id => {
@@ -639,6 +816,8 @@ updateStepperUI();
 
 btnStartGame.addEventListener('click', () => {
     if (currentRoomCode) {
+        lastCompletedActionLog = [];
+        hideLobbyActionLog();
         socket.emit('startGame', { roomCode: currentRoomCode, settings: getSettings() });
     }
 });
@@ -664,6 +843,23 @@ function switchChatTab(targetId) {
     });
     const targetBox = document.getElementById(targetId);
     if (targetBox) targetBox.classList.remove('hidden');
+}
+
+function showLobbyChat() {
+    waitingChat.classList.remove('hidden');
+    waitingChat.style.display = '';
+}
+
+function hideLobbyActionLog() {
+    const panel = document.getElementById('lobby-action-log-panel');
+    if (panel) panel.classList.add('hidden');
+}
+
+function showLobbyActionLog(logEntries = lastCompletedActionLog) {
+    const panel = document.getElementById('lobby-action-log-panel');
+    if (!panel) return;
+    renderWinActionLog(logEntries, 'lobby-action-log');
+    panel.classList.remove('hidden');
 }
 
 tabBtns.forEach(btn => {
@@ -702,9 +898,11 @@ btnConfirmAction.addEventListener('click', () => {
 socket.on('roomCreated', (data) => {
     currentRoomCode = data.roomCode;
     myPlayerInfo = data.player;
+    lastCompletedActionLog = [];
+    hideLobbyActionLog();
     displayRoomCode.textContent = currentRoomCode;
     waitingChat.innerHTML = '';
-    waitingChat.classList.remove('hidden');
+    showLobbyChat();
     waitingChatInput.value = '';
     switchScreen('waiting');
     document.getElementById('btn-mic').style.display = 'block';
@@ -722,9 +920,11 @@ socket.on('roomCreated', (data) => {
 socket.on('roomJoined', (data) => {
     currentRoomCode = data.roomCode;
     myPlayerInfo = data.player;
+    lastCompletedActionLog = [];
+    hideLobbyActionLog();
     displayRoomCode.textContent = currentRoomCode;
     waitingChat.innerHTML = '';
-    waitingChat.classList.remove('hidden');
+    showLobbyChat();
     waitingChatInput.value = '';
     switchScreen('waiting');
     document.getElementById('btn-mic').style.display = 'block';
@@ -736,7 +936,9 @@ socket.on('roomJoined', (data) => {
 
 socket.on('settingsUpdated', (settings) => {
     if (myPlayerInfo && !myPlayerInfo.isHost) {
-        document.getElementById('reveal-on-death').checked = settings.revealRoleOnDeath;
+        document.getElementById('reveal-on-death').checked = settings.revealRoleOnDeath !== false;
+        document.getElementById('show-death-cause').checked = settings.showDeathCause === true;
+        document.getElementById('anonymous-match').checked = settings.anonymousMatch === true;
 
         if (settings.roles) {
             roleSettingsKeys.forEach(key => {
@@ -799,10 +1001,17 @@ socket.on('error', (msg) => {
     showNotification(msg);
 });
 
+socket.on('roleActionSfx', ({ type }) => {
+    audioManager.playRoleSfx(type);
+});
+
 // Socket Events - Game
 socket.on('gameStateUpdate', (gameState) => {
     const previousPhaseState = lastPhaseState;
     currentGameState = gameState;
+    if (gameState.state !== 'LOBBY') {
+        hideLobbyActionLog();
+    }
     if (gameState.player) {
         myPlayerInfo = gameState.player;
         if (myPlayerInfo.role) setRoleDisplay(myPlayerInfo.role);
@@ -924,23 +1133,32 @@ function getRoleColor(role) {
 function setRoleDisplay(role) {
     const name = roleTranslations[role] || role;
     const desc = roleDescriptions[role] || '';
-    const alignmentNote = (myPlayerInfo && myPlayerInfo.isWolfAligned && !wolfRoles.includes(role))
-        ? '<div style="font-size:0.72rem; line-height:1.3; margin-top:8px; color:#fca5a5; font-weight:700;">Bạn đang theo phe Ma Sói nhưng vẫn giữ kỹ năng vai trò gốc.</div>'
-        : '';
-    myRoleDisplay.innerHTML = `
-        <div style="font-family: var(--font-display); font-size: 1.2rem; margin-bottom: 4px;">${name}</div>
-        <div style="font-size: 0.7rem; line-height: 1.3; opacity: 0.9; font-weight: normal; font-style: italic; max-width: 250px;">
-            ${desc}
-        </div>
-        ${alignmentNote}
-    `;
 
-    let roleColor = getRoleColor(role);
+    myRoleDisplay.innerHTML = '';
+
+    const roleName = document.createElement('div');
+    roleName.className = 'role-card-name';
+    roleName.textContent = name;
+    myRoleDisplay.appendChild(roleName);
+
+    const roleDesc = document.createElement('p');
+    roleDesc.className = 'role-card-desc';
+    roleDesc.textContent = desc;
+    myRoleDisplay.appendChild(roleDesc);
+
+    if (myPlayerInfo && myPlayerInfo.isWolfAligned && !wolfRoles.includes(role)) {
+        const alignmentNote = document.createElement('p');
+        alignmentNote.className = 'role-card-note';
+        alignmentNote.textContent = 'Bạn đang theo phe Ma Sói nhưng vẫn giữ kỹ năng vai trò gốc.';
+        myRoleDisplay.appendChild(alignmentNote);
+    }
+
+    const roleColor = getRoleColor(role);
     myRoleDisplay.style.color = roleColor;
     myRoleDisplay.style.borderColor = roleColor;
-    myRoleDisplay.style.backgroundColor = 'rgba(0,0,0,0.3)';
-    myRoleDisplay.style.padding = '12px';
-    myRoleDisplay.style.borderRadius = '8px';
+    myRoleDisplay.style.backgroundColor = '';
+    myRoleDisplay.style.padding = '';
+    myRoleDisplay.style.borderRadius = '';
 }
 
 function showSlotMachine(finalRole) {
@@ -1001,6 +1219,7 @@ socket.on('timerUpdate', (time) => {
 
 socket.on('systemMessage', (msg) => {
     if (!currentGameState || currentGameState.state === 'LOBBY') {
+        showLobbyChat();
         appendChatMessage(waitingChat, { isSystem: true, message: msg });
         return;
     }
@@ -1070,6 +1289,7 @@ socket.on('slotTimerUpdate', (timeLeft) => { });
 
 socket.on('chatMessage', (data) => {
     if (!currentGameState || currentGameState.state === 'LOBBY') {
+        showLobbyChat();
         appendChatMessage(waitingChat, data);
         return;
     }
@@ -1085,10 +1305,50 @@ socket.on('chatMessage', (data) => {
     }
 });
 
-socket.on('gameOver', ({ winnerTeam, roles }) => {
+function renderWinActionLog(logEntries = [], containerId = 'lobby-action-log') {
+    const logContainer = document.getElementById(containerId);
+    if (!logContainer) return;
+
+    logContainer.innerHTML = '';
+    if (!Array.isArray(logEntries) || logEntries.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'win-action-log-empty';
+        empty.textContent = 'Không có log hành động cho ván này.';
+        logContainer.appendChild(empty);
+        return;
+    }
+
+    const groups = new Map();
+    logEntries.forEach(entry => {
+        const phase = entry.phase || 'Diễn biến';
+        if (!groups.has(phase)) groups.set(phase, []);
+        groups.get(phase).push(entry.text || '');
+    });
+
+    groups.forEach((items, phase) => {
+        const group = document.createElement('section');
+        group.className = 'win-action-log-group';
+
+        const title = document.createElement('h3');
+        title.textContent = phase;
+        group.appendChild(title);
+
+        const list = document.createElement('ol');
+        items.forEach(text => {
+            const item = document.createElement('li');
+            item.textContent = text;
+            list.appendChild(item);
+        });
+        group.appendChild(list);
+        logContainer.appendChild(group);
+    });
+}
+
+socket.on('gameOver', ({ winnerTeam, roles, actionLog = [] }) => {
     phaseIndicator.textContent = 'Kết Thúc';
     timerDisplay.textContent = '--';
     document.body.className = '';
+    lastCompletedActionLog = Array.isArray(actionLog) ? actionLog : [];
 
     const winScreen = document.getElementById('win-screen');
     const winMessage = document.getElementById('win-message');
@@ -1164,12 +1424,13 @@ socket.on('gameReset', () => {
     myRoleDisplay.style.borderColor = 'var(--text-main)';
     document.getElementById('werewolf-tab').classList.add('hidden');
     document.getElementById('ghost-tab').classList.add('hidden');
-    waitingChat.classList.remove('hidden');
+    showLobbyChat();
     generalChat.innerHTML = '';
     werewolfChat.innerHTML = '';
     ghostChat.innerHTML = '';
     document.getElementById('win-screen').classList.add('hidden');
     switchScreen('waiting');
+    showLobbyActionLog();
 });
 
 // Track chat bubbles separately from rendered cards, because vote/action updates rebuild the grid.
@@ -1257,10 +1518,14 @@ function renderPlayersGrid(players) {
         const div = document.createElement('div');
         div.dataset.playerId = p.id;
         div.id = getPlayerCardId(p.id);
+        const displayName = getPlayerDisplayName(p, idx);
 
         const classes = ['player-card'];
         if (!p.isAlive) classes.push('dead');
         if (p.id === socket.id) classes.push('me');
+        if (p.doctorSavedLastNight && currentGameState && (currentGameState.state === 'DAY' || currentGameState.state === 'VOTE')) {
+            classes.push('doctor-saved');
+        }
         div.className = classes.join(' ');
 
         // Position in circle using % so it's responsive. Scale radius based on player count.
@@ -1271,22 +1536,28 @@ function renderPlayersGrid(players) {
         // Avatar
         const img = document.createElement('img');
         img.id = `avatar-game-${p.id}`;
-        img.src = getAvatarUrl(p.name);
+        img.src = isAnonymousMatchEnabled() ? getAnonymousAvatarUrl() : getAvatarUrl(p.name);
         img.className = 'player-avatar';
-        img.alt = p.name;
+        img.alt = displayName;
 
         // Name + role label
         const infoDiv = document.createElement('div');
-        let displayContent = `<strong style="font-size:0.8rem">${idx + 1}. ${p.name}</strong>`;
+        let displayContent = `<strong style="font-size:0.8rem">${escapeHtml(getPlayerCardName(p, idx))}</strong>`;
         if (p.role) {
             const roleName = roleTranslations[p.role] || p.role;
-            displayContent += `<br><span class="revealed-role" style="color:${getRoleColor(p.role)}">${roleName}</span>`;
+            displayContent += `<br><span class="revealed-role" style="color:${getRoleColor(p.role)}">${escapeHtml(roleName)}</span>`;
         }
         if (p.auraAlignment) {
             const auraColor = p.auraAlignment === 'Good (Dân Làng)' ? '#22c55e'
                 : p.auraAlignment === 'Evil (Ma Sói)' ? '#ef4444'
                     : '#f59e0b';
-            displayContent += `<br><span class="revealed-role" style="color:${auraColor}; border-color:${auraColor};">${p.auraAlignment}</span>`;
+            displayContent += `<br><span class="revealed-role" style="color:${auraColor}; border-color:${auraColor};">${escapeHtml(p.auraAlignment)}</span>`;
+        }
+        if (!p.isAlive && p.deathCause) {
+            displayContent += `<br><span class="death-cause">${escapeHtml(p.deathCause)}</span>`;
+        }
+        if (p.doctorSavedLastNight && currentGameState && (currentGameState.state === 'DAY' || currentGameState.state === 'VOTE')) {
+            displayContent += '<br><span class="doctor-saved-label">Được bác sĩ cứu</span>';
         }
         infoDiv.innerHTML = displayContent;
 
@@ -1296,7 +1567,7 @@ function renderPlayersGrid(players) {
                 const countBadge = document.createElement('div');
                 countBadge.className = 'vote-count-badge';
                 countBadge.textContent = `${voteCount}`;
-                countBadge.title = `${voteCount} phiếu đang hướng vào ${p.name}`;
+                countBadge.title = `${voteCount} phiếu đang hướng vào ${displayName}`;
                 div.appendChild(countBadge);
             }
 
@@ -1310,7 +1581,7 @@ function renderPlayersGrid(players) {
                     const dy = targetPosition.y - cy;
                     const pointer = document.createElement('div');
                     pointer.className = `vote-pointer ${getVotePointerPositionClass(dx, dy)}`;
-                    pointer.title = `${p.name} đang vote người số ${targetNumber}`;
+                    pointer.title = `${displayName} đang vote người số ${targetNumber}`;
 
                     const hand = document.createElement('span');
                     hand.className = 'vote-pointer-hand';
@@ -1329,7 +1600,7 @@ function renderPlayersGrid(players) {
 
         // --- VOTE BADGES ---
         if (false && currentGameState && currentGameState.state === 'VOTE') {
-            const voters = currentDayVotes.filter(v => v.targetId === p.id).map(v => v.voterName);
+            const voters = currentDayVotes.filter(v => v.targetId === p.id).map(v => getPlayerDisplayNameById(v.voterId, players));
             if (voters.length > 0) {
                 const badge = document.createElement('div');
                 badge.className = 'vote-badge';
@@ -1345,7 +1616,7 @@ function renderPlayersGrid(players) {
         }
 
         if (currentGameState && currentGameState.state === 'NIGHT' && isWolfTeamMember(myPlayerInfo)) {
-            const wolves = currentWerewolfVotes.filter(v => v.targetId === p.id).map(v => v.voterName);
+            const wolves = currentWerewolfVotes.filter(v => v.targetId === p.id).map(v => getPlayerDisplayNameById(v.voterId, players));
             if (wolves.length > 0) {
                 const badge = document.createElement('div');
                 badge.className = 'vote-badge';
@@ -1497,6 +1768,15 @@ function renderPlayersGrid(players) {
                     div.classList.add('targeted-ignite');
                     div.title = "Nhấn để CHÂM LỬA (Tiêu diệt tất cả người bị douse)";
                 }
+                if (role === 'DOCTOR' && myPlayerInfo.role === 'DOCTOR') {
+                    const cantTarget = p.id === myPlayerInfo.doctorLastHealed;
+                    if (!cantTarget) {
+                        canTarget = true; actionType = 'DOCTOR_HEAL';
+                        div.title = "Nhấn để tự bảo vệ đêm nay";
+                    }
+                    if (myPlayerInfo.doctorProtectedTargetId === p.id) div.classList.add('targeted-heal');
+                    if (actionType && p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                }
             } else {
                 if (canUseWerewolfKill() && !isWolfTeamMember(p)) {
                     canTarget = true;
@@ -1546,7 +1826,7 @@ function renderPlayersGrid(players) {
                         div.title = "Nhấn để Bảo vệ người này";
                     }
                     if (myPlayerInfo.doctorProtectedTargetId === p.id) div.classList.add('targeted-heal');
-                    if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                    if (actionType && p.id === actionTargetId) div.classList.add(targetClass[actionType]);
                 } else if (role === 'RED_LADY' && myPlayerInfo.role === 'RED_LADY') {
                     canTarget = true; actionType = 'RED_LADY_VISIT';
                     div.title = "Nhấn để ghé thăm người này";
@@ -1590,12 +1870,12 @@ function renderPlayersGrid(players) {
                     if (actionType === 'ARSONIST_DOUSE') {
                         if (hasConvertedWolfActions(myPlayerInfo) && !isWolfTeamMember(p)) {
                             const hasKillVote = !!currentWerewolfVotes.find(v => v.voterId === socket.id && v.targetId === p.id);
-                            openChoiceModal('Hành động ban đêm', `Chọn hành động với ${p.name}.`, [
+                            openChoiceModal('Hành động ban đêm', `Chọn hành động với ${displayName}.`, [
                                 {
                                     label: 'Tưới xăng',
                                     onClick: () => {
                                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'ARSONIST_DOUSE', targetId: p.id });
-                                        showNotification(`Đã chọn tưới xăng ${p.name}.`);
+                                        showNotification(`Đã chọn tưới xăng ${displayName}.`);
                                         renderPlayersGrid(currentGameState.players);
                                     }
                                 },
@@ -1604,7 +1884,7 @@ function renderPlayersGrid(players) {
                                     danger: true,
                                     onClick: () => {
                                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WEREWOLF_KILL', targetId: p.id });
-                                        showNotification(hasKillVote ? `Đã bỏ vote giết ${p.name}.` : `Đã vote giết ${p.name}.`);
+                                        showNotification(hasKillVote ? `Đã bỏ vote giết ${displayName}.` : `Đã vote giết ${displayName}.`);
                                         renderPlayersGrid(currentGameState.players);
                                     }
                                 },
@@ -1635,7 +1915,7 @@ function renderPlayersGrid(players) {
                                     label: 'Soi phe',
                                     onClick: () => {
                                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AURA_SEER_CHECK', targetId: p.id });
-                                        showNotification(`Đang soi phe ${p.name}.`);
+                                        showNotification(`Đang soi phe ${displayName}.`);
                                         renderPlayersGrid(currentGameState.players);
                                     }
                                 });
@@ -1644,9 +1924,7 @@ function renderPlayersGrid(players) {
                             roleChoices.push({
                                 label: 'Bảo vệ',
                                 onClick: () => {
-                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'DOCTOR_HEAL', targetId: p.id });
-                                    showNotification(`Đã chọn bảo vệ ${p.name}.`);
-                                    renderPlayersGrid(currentGameState.players);
+                                    confirmDoctorHeal(p.id, displayName);
                                 }
                             });
                         } else if (actionType === 'RED_LADY_VISIT') {
@@ -1654,7 +1932,7 @@ function renderPlayersGrid(players) {
                                 label: 'Ghé thăm',
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'RED_LADY_VISIT', targetId: p.id });
-                                    showNotification(`Đã chọn ghé thăm ${p.name}.`);
+                                    showNotification(`Đã chọn ghé thăm ${displayName}.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -1663,7 +1941,7 @@ function renderPlayersGrid(players) {
                                 label: 'Chọn tiết lộ',
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'LOUDMOUTH_SELECT', targetId: p.id });
-                                    showNotification(`Đã chọn ${p.name}.`);
+                                    showNotification(`Đã chọn ${displayName}.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -1672,7 +1950,7 @@ function renderPlayersGrid(players) {
                                 label: 'Bảo vệ thay',
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'MAID_PROTECT', targetId: p.id });
-                                    showNotification(`Đã chọn bảo vệ ${p.name}.`);
+                                    showNotification(`Đã chọn bảo vệ ${displayName}.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -1681,7 +1959,7 @@ function renderPlayersGrid(players) {
                                 label: 'Chọn báo thù',
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AVENGER_SELECT', targetId: p.id });
-                                    showNotification(`Đã chọn ${p.name} làm mục tiêu báo thù.`);
+                                    showNotification(`Đã chọn ${displayName} làm mục tiêu báo thù.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -1691,7 +1969,7 @@ function renderPlayersGrid(players) {
                                     label: 'Dùng Bình Máu',
                                     onClick: () => {
                                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WITCH_HEAL', targetId: p.id });
-                                        showNotification(`Đã dùng Bình Máu lên ${p.name}.`);
+                                        showNotification(`Đã dùng Bình Máu lên ${displayName}.`);
                                         renderPlayersGrid(currentGameState.players);
                                     }
                                 });
@@ -1702,7 +1980,7 @@ function renderPlayersGrid(players) {
                                     danger: true,
                                     onClick: () => {
                                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WITCH_POISON', targetId: p.id });
-                                        showNotification(`Đã dùng Bình Độc lên ${p.name}.`);
+                                        showNotification(`Đã dùng Bình Độc lên ${displayName}.`);
                                         renderPlayersGrid(currentGameState.players);
                                     }
                                 });
@@ -1712,7 +1990,7 @@ function renderPlayersGrid(players) {
                                 label: 'Tưới xăng',
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'ARSONIST_DOUSE', targetId: p.id });
-                                    showNotification(`Đã chọn tưới xăng ${p.name}.`);
+                                    showNotification(`Đã chọn tưới xăng ${displayName}.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -1723,13 +2001,13 @@ function renderPlayersGrid(players) {
                             danger: true,
                             onClick: () => {
                                 socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WEREWOLF_KILL', targetId: p.id });
-                                showNotification(hasKillVote ? `Đã bỏ vote giết ${p.name}.` : `Đã vote giết ${p.name}.`);
+                                showNotification(hasKillVote ? `Đã bỏ vote giết ${displayName}.` : `Đã vote giết ${displayName}.`);
                                 renderPlayersGrid(currentGameState.players);
                             }
                         });
 
                         roleChoices.push({ label: 'Đóng' });
-                        openChoiceModal('Hành động ban đêm', `Chọn hành động với ${p.name}.`, roleChoices);
+                        openChoiceModal('Hành động ban đêm', `Chọn hành động với ${displayName}.`, roleChoices);
                         return;
                     }
 
@@ -1743,7 +2021,7 @@ function renderPlayersGrid(players) {
                             danger: true,
                             onClick: () => {
                                 socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WEREWOLF_KILL', targetId: p.id });
-                                showNotification(hasKillVote ? `Đã bỏ vote giết ${p.name}.` : `Đã vote giết ${p.name}.`);
+                                showNotification(hasKillVote ? `Đã bỏ vote giết ${displayName}.` : `Đã vote giết ${displayName}.`);
                             }
                         });
 
@@ -1753,14 +2031,14 @@ function renderPlayersGrid(players) {
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'CURSED_WOLF_TURN', targetId: p.id });
                                     myPlayerInfo.cursedWolfTarget = hasCurseVote ? null : p.id;
-                                    showNotification(hasCurseVote ? `Đã bỏ nguyền ${p.name}.` : `Đã chọn nguyền ${p.name}.`);
+                                    showNotification(hasCurseVote ? `Đã bỏ nguyền ${displayName}.` : `Đã chọn nguyền ${displayName}.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
                         }
 
                         choices.push({ label: 'Bỏ qua' });
-                        openChoiceModal('Sói Nguyền', `Chọn hành động với ${p.name}.`, choices);
+                        openChoiceModal('Sói Nguyền', `Chọn hành động với ${displayName}.`, choices);
                         return;
                     }
 
@@ -1773,7 +2051,7 @@ function renderPlayersGrid(players) {
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WITCH_HEAL', targetId: p.id });
                                     nightActionMode = null;
-                                    showNotification(`Đã dùng Bình Máu lên ${p.name}.`);
+                                    showNotification(`Đã dùng Bình Máu lên ${displayName}.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -1786,7 +2064,7 @@ function renderPlayersGrid(players) {
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'WITCH_POISON', targetId: p.id });
                                     nightActionMode = null;
-                                    showNotification(`Đã dùng Bình Độc lên ${p.name}.`);
+                                    showNotification(`Đã dùng Bình Độc lên ${displayName}.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -1802,7 +2080,7 @@ function renderPlayersGrid(players) {
                             }
                         });
 
-                        openChoiceModal('Phù Thủy', `Chọn loại thuốc dùng lên ${p.name}.`, choices);
+                        openChoiceModal('Phù Thủy', `Chọn loại thuốc dùng lên ${displayName}.`, choices);
                         return;
                     }
 
@@ -1812,10 +2090,10 @@ function renderPlayersGrid(players) {
                         if (!shouldKeepNightActionOpen()) nightActionMode = null;
 
                         const messages = {
-                            RED_LADY_VISIT: `Đã chọn ghé thăm ${p.name}.`,
-                            LOUDMOUTH_SELECT: `Đã chọn ${p.name}.`,
-                            MAID_PROTECT: `Đã chọn bảo vệ ${p.name}.`,
-                            AVENGER_SELECT: `Đã chọn ${p.name} làm mục tiêu báo thù.`
+                            RED_LADY_VISIT: `Đã chọn ghé thăm ${displayName}.`,
+                            LOUDMOUTH_SELECT: `Đã chọn ${displayName}.`,
+                            MAID_PROTECT: `Đã chọn bảo vệ ${displayName}.`,
+                            AVENGER_SELECT: `Đã chọn ${displayName} làm mục tiêu báo thù.`
                         };
                         showNotification(messages[actionType] || 'Đã chọn mục tiêu.');
                         renderPlayersGrid(currentGameState.players);
@@ -1839,13 +2117,10 @@ function renderPlayersGrid(players) {
                         } else if (actionType === 'AURA_SEER_CHECK' || actionType === 'WOLF_SEER_CHECK') {
                             socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
                             if (!shouldKeepNightActionOpen()) nightActionMode = null;
-                            showNotification(`Đang soi xét ${p.name}...`);
+                            showNotification(`Đang soi xét ${displayName}...`);
                             renderPlayersGrid(currentGameState.players);
                         } else if (actionType === 'DOCTOR_HEAL') {
-                            socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
-                            if (!shouldKeepNightActionOpen()) nightActionMode = null;
-                            showNotification(`Đã bảo vệ ${p.name} đêm nay.`);
-                            renderPlayersGrid(currentGameState.players);
+                            confirmDoctorHeal(p.id, displayName);
                         } else if (actionType === 'WITCH_TARGET' || actionType === 'CURSED_WOLF_TARGET') {
                             renderPlayersGrid(currentGameState.players);
                         }
@@ -1880,12 +2155,12 @@ function renderPlayersGrid(players) {
                 div.addEventListener('click', () => {
                     if (actionType === 'AVENGER_SELECT') {
                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
-                        showNotification(`Đã chọn ${p.name} làm mục tiêu báo thù.`);
+                        showNotification(`Đã chọn ${displayName} làm mục tiêu báo thù.`);
                         return;
                     }
 
                     actionTitle.textContent = actionType === 'NIGHTMARE_SLEEP' ? 'Kỹ Năng Ru Ngủ' : 'Nước Thánh';
-                    actionDescription.textContent = `Bạn có chắc muốn sử dụng kỹ năng lên ${p.name}?`;
+                    actionDescription.textContent = `Bạn có chắc muốn sử dụng kỹ năng lên ${displayName}?`;
                     pendingActionType = actionType;
                     actionTargetId = p.id;
                     actionTargets.innerHTML = ''; // Not used for this modal mode
@@ -1908,7 +2183,7 @@ function renderPlayersGrid(players) {
                 if (myPlayerInfo && myPlayerInfo.role === 'AVENGER') {
                     const myVote = currentDayVotes.find(v => v.voterId === socket.id);
                     const hasVote = myVote && myVote.targetId === p.id;
-                    openChoiceModal('Kẻ Báo Thù', `Chọn hành động với ${p.name}.`, [
+                    openChoiceModal('Kẻ Báo Thù', `Chọn hành động với ${displayName}.`, [
                         {
                             label: hasVote ? 'Bỏ phiếu treo' : 'Bỏ phiếu',
                             danger: true,
@@ -1920,7 +2195,7 @@ function renderPlayersGrid(players) {
                             label: 'Chọn báo thù',
                             onClick: () => {
                                 socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AVENGER_SELECT', targetId: p.id });
-                                showNotification(`Đã chọn ${p.name} làm mục tiêu báo thù.`);
+                                showNotification(`Đã chọn ${displayName} làm mục tiêu báo thù.`);
                             }
                         },
                         { label: 'Đóng' }
@@ -2090,8 +2365,10 @@ function getVotePointerPositionClass(dx, dy) {
 }
 
 function triggerDayActionModal(targetPlayer) {
+    const targetIndex = currentGameState?.players?.findIndex(player => player.id === targetPlayer.id) ?? -1;
+    const targetName = getPlayerDisplayName(targetPlayer, targetIndex >= 0 ? targetIndex : null);
     actionTitle.textContent = 'Bỏ Phiếu Treo Cổ';
-    actionDescription.textContent = `Bạn có muốn bỏ phiếu treo cổ ${targetPlayer.name} không?`;
+    actionDescription.textContent = `Bạn có muốn bỏ phiếu treo cổ ${targetName} không?`;
     pendingActionType = 'VOTE';
     actionTargetId = targetPlayer.id;
     actionTargets.innerHTML = '';

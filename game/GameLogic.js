@@ -17,6 +17,15 @@ function sanitizeAvatarUrl(url) {
     }
 }
 
+function shuffleArray(items) {
+    const shuffled = [...items];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
+
 class GameLogic {
     constructor(roomCode, io) {
         this.roomCode = roomCode;
@@ -43,6 +52,7 @@ class GameLogic {
             roles: {}
         };
         this.nextPlayerIndex = 1;
+        this.playerOrder = [];
         
         this.nightmareSleepCharges = 2;
         this.sleepingPlayerId = null;
@@ -103,6 +113,16 @@ class GameLogic {
         return !!this.getJailerIdForJailedTarget(socketId);
     }
 
+    getPlayerIdsInDisplayOrder() {
+        const currentIds = Object.keys(this.players);
+        if (this.state === 'LOBBY' || this.playerOrder.length === 0) return currentIds;
+
+        const currentIdSet = new Set(currentIds);
+        const orderedIds = this.playerOrder.filter(id => currentIdSet.has(id));
+        const missingIds = currentIds.filter(id => !orderedIds.includes(id));
+        return [...orderedIds, ...missingIds];
+    }
+
     addPlayer(socketId, name, isHost, avatarUrl = null) {
         this.players[socketId] = {
             id: socketId,
@@ -138,6 +158,7 @@ class GameLogic {
         Object.keys(this.jailerJailedTargetIds).forEach(jailerId => {
             if (this.jailerJailedTargetIds[jailerId] === socketId) delete this.jailerJailedTargetIds[jailerId];
         });
+        this.playerOrder = this.playerOrder.filter(id => id !== socketId);
         // If host leaves, assign new host
         const remainingIds = Object.keys(this.players);
         if (remainingIds.length > 0 && !Object.values(this.players).some(p => p.isHost)) {
@@ -153,7 +174,11 @@ class GameLogic {
     getPlayers(forSocketId) {
         const forPlayer = this.players[forSocketId];
         
-        return Object.values(this.players).map(p => {
+        return this.getPlayerIdsInDisplayOrder().map(id => this.players[id]).filter(Boolean).map((p, index) => {
+            if (this.state !== 'LOBBY') {
+                p.playerIndex = index + 1;
+            }
+
             let reveal = false;
             if (p.id === forSocketId) reveal = true;
             if (p.publiclyRevealedRole) reveal = true;
@@ -211,6 +236,7 @@ class GameLogic {
         }
 
         this.actionLog = [];
+        this.playerOrder = shuffleArray(Object.keys(this.players));
         this.assignRoles(settings);
         this.addActionLog(`Trò chơi bắt đầu với ${playerCount} người chơi.`, 'Bắt đầu');
         this.state = 'ROLE_REVEAL';
@@ -225,12 +251,7 @@ class GameLogic {
     }
 
     assignRoles(settings) {
-        const ids = Object.keys(this.players);
-        // Shuffle ids
-        for (let i = ids.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [ids[i], ids[j]] = [ids[j], ids[i]];
-        }
+        const ids = shuffleArray(Object.keys(this.players));
 
         const roles = this.buildRoleDeck(settings.roles);
         
@@ -1142,7 +1163,7 @@ class GameLogic {
     }
 
     revealAllRoles(winnerTeam) {
-        const allRoles = Object.values(this.players).map(p => ({
+        const allRoles = this.getPlayerIdsInDisplayOrder().map(id => this.players[id]).filter(Boolean).map(p => ({
             name: p.name,
             avatarUrl: p.avatarUrl || null,
             role: p.role
@@ -1164,6 +1185,7 @@ class GameLogic {
     resetGame() {
         this.state = 'LOBBY';
         this.dayNumber = 0;
+        this.playerOrder = [];
         if (this.timer) { clearInterval(this.timer); this.timer = null; }
         if (this.nightTimer) { clearInterval(this.nightTimer); this.nightTimer = null; }
         this.nightActions = [];

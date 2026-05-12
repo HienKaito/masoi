@@ -125,6 +125,34 @@
             description: 'Phe Dân Làng. Ban đêm, bạn có thể nói chuyện ẩn danh với người đã chết và xem tin nhắn của chat hồn ma trong đêm.'
         },
         {
+            id: 'SHERIFF',
+            settingsKey: 'sheriff',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            hasNightAction: true,
+            name: 'Cảnh Sát Trưởng',
+            color: '#0ea5e9',
+            description: 'Phe Dân Làng. Mỗi đêm, bạn chọn tối đa 2 người để theo dõi. Nếu một người bị theo dõi chết trực tiếp trong đêm, bạn nhận 2 nghi phạm có thể đã gây ra cái chết đó.'
+        },
+        {
+            id: 'FLOWER_CHILD',
+            settingsKey: 'flower_child',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            name: 'Đứa Trẻ Hoa',
+            color: '#ec4899',
+            description: 'Phe Dân Làng. Một lần mỗi ván vào ban ngày, bạn có thể bảo vệ 1 người khỏi bị cả làng treo cổ trong lượt bỏ phiếu hôm đó.'
+        },
+        {
+            id: 'CURSED',
+            settingsKey: 'cursed',
+            team: 'VILLAGE',
+            alignment: 'GOOD',
+            name: 'Người Bị Nguyền',
+            color: '#a3e635',
+            description: 'Phe Dân Làng khi bắt đầu. Nếu bị Ma Sói tấn công, bạn không chết mà biến thành Ma Sói thường và từ đó thắng với phe Sói.'
+        },
+        {
             id: 'WEREWOLF',
             settingsKey: 'werewolf',
             team: 'WEREWOLF',
@@ -167,6 +195,17 @@
             name: 'Sói Nguyền',
             color: 'var(--wolf-red)',
             description: 'Phe Ma Sói. Một lần mỗi ván, bạn có thể nguyền rủa 1 người. Người đó sẽ biến thành Sói vào sáng hôm sau.'
+        },
+        {
+            id: 'GUARDIAN_WOLF',
+            settingsKey: 'guardian_wolf',
+            team: 'WEREWOLF',
+            alignment: 'EVIL',
+            isWolfRole: true,
+            hasNightAction: true,
+            name: 'Sói Hộ Vệ',
+            color: 'var(--wolf-red)',
+            description: 'Phe Ma Sói. Ban đêm, bạn nói chuyện và vote cắn cùng bầy Sói. Ban ngày, bạn có thể chọn 1 người để bảo vệ khỏi bị treo cổ; nếu bảo vệ thành công, kỹ năng sẽ bị tiêu hao.'
         },
         {
             id: 'ARSONIST',

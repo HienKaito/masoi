@@ -1353,6 +1353,8 @@ socket.on('yourTurn', ({ role }) => {
                 ? `⏱ Lượt của bạn (${rName})! Bạn có thể xử tử người đang bị giam trong đêm nay.`
                 : `⏱ Lượt của bạn (${rName})! Bạn có thể nói chuyện với người đang bị giam trong tab Nhà Giam.`);
             switchChatTab('jail-chat');
+        } else if (role === 'SHERIFF') {
+            showNotification(`⏱ Lượt của bạn (${rName})! Chọn tối đa 2 người để theo dõi đêm nay.`);
         } else {
             showNotification(`⏱ Lượt của bạn (${rName})! Chọn mục tiêu bằng cách nhấn vào thẻ bài (30s).`);
         }
@@ -1819,6 +1821,39 @@ function renderPlayersGrid(players) {
             div.appendChild(jailerBadge);
         }
 
+        if (myPlayerInfo && myPlayerInfo.role === 'SHERIFF' && myPlayerInfo.sheriffWatchTargetIds && myPlayerInfo.sheriffWatchTargetIds.includes(p.id)) {
+            const sheriffBadge = document.createElement('div');
+            sheriffBadge.innerHTML = '🕵️';
+            sheriffBadge.style.position = 'absolute';
+            sheriffBadge.style.top = '5px';
+            sheriffBadge.style.left = '5px';
+            sheriffBadge.style.fontSize = '1.2rem';
+            sheriffBadge.title = 'Đang được bạn theo dõi đêm nay';
+            div.appendChild(sheriffBadge);
+        }
+
+        if (myPlayerInfo && myPlayerInfo.role === 'FLOWER_CHILD' && myPlayerInfo.flowerChildProtectedTargetId === p.id) {
+            const flowerBadge = document.createElement('div');
+            flowerBadge.innerHTML = '🌸';
+            flowerBadge.style.position = 'absolute';
+            flowerBadge.style.top = '5px';
+            flowerBadge.style.left = '5px';
+            flowerBadge.style.fontSize = '1.2rem';
+            flowerBadge.title = 'Được bảo vệ khỏi treo cổ hôm nay';
+            div.appendChild(flowerBadge);
+        }
+
+        if (myPlayerInfo && myPlayerInfo.role === 'GUARDIAN_WOLF' && myPlayerInfo.guardianWolfProtectedTargetId === p.id) {
+            const guardianBadge = document.createElement('div');
+            guardianBadge.innerHTML = '🛡️';
+            guardianBadge.style.position = 'absolute';
+            guardianBadge.style.top = '5px';
+            guardianBadge.style.left = '5px';
+            guardianBadge.style.fontSize = '1.2rem';
+            guardianBadge.title = 'Được Sói Hộ Vệ bảo vệ khỏi treo cổ hôm nay';
+            div.appendChild(guardianBadge);
+        }
+
         if (myPlayerInfo && myPlayerInfo.isJailedTonight && p.id === socket.id) {
             const jailedBadge = document.createElement('div');
             jailedBadge.innerHTML = '🔒';
@@ -1888,7 +1923,8 @@ function renderPlayersGrid(players) {
                 'LOUDMOUTH_SELECT': 'targeted-reveal',
                 'MAID_PROTECT': 'targeted-heal',
                 'AVENGER_SELECT': 'targeted-avenge',
-                'JAILER_EXECUTE': 'targeted-jail'
+                'JAILER_EXECUTE': 'targeted-jail',
+                'SHERIFF_WATCH': 'targeted-watch'
             };
 
             if (p.id === socket.id) {
@@ -1980,6 +2016,13 @@ function renderPlayersGrid(players) {
                     canTarget = true; actionType = 'JAILER_EXECUTE';
                     div.title = "Nhấn để xử tử người đang bị giam";
                     if (p.id === actionTargetId) div.classList.add(targetClass[actionType]);
+                } else if (role === 'SHERIFF' && myPlayerInfo.role === 'SHERIFF') {
+                    const watched = myPlayerInfo.sheriffWatchTargetIds || [];
+                    if (watched.includes(p.id) || watched.length < 2) {
+                        canTarget = true; actionType = 'SHERIFF_WATCH';
+                        div.title = watched.includes(p.id) ? "Nhấn để bỏ theo dõi người này" : "Nhấn để theo dõi người này";
+                    }
+                    if (watched.includes(p.id)) div.classList.add(targetClass[actionType]);
                 } else if (role === 'WITCH' && nightActionMode === 'WITCH') {
                     canTarget = true; actionType = 'WITCH_TARGET';
                     div.title = "Nhấn chọn làm mục tiêu dùng bình";
@@ -2039,6 +2082,14 @@ function renderPlayersGrid(players) {
                             div.classList.add(targetClass['ARSONIST_DOUSE']);
                         }
                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
+                        return;
+                    }
+
+                    if (actionType === 'SHERIFF_WATCH' && !hasConvertedWolfActions(myPlayerInfo)) {
+                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
+                        const watched = myPlayerInfo.sheriffWatchTargetIds || [];
+                        showNotification(watched.includes(p.id) ? `Đã bỏ theo dõi ${displayName}.` : `Đã chọn theo dõi ${displayName}.`);
+                        renderPlayersGrid(currentGameState.players);
                         return;
                     }
 
@@ -2107,6 +2158,16 @@ function renderPlayersGrid(players) {
                                 onClick: () => {
                                     socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'JAILER_EXECUTE', targetId: p.id });
                                     showNotification(`Đã quyết định xử tử ${displayName}.`);
+                                    renderPlayersGrid(currentGameState.players);
+                                }
+                            });
+                        } else if (actionType === 'SHERIFF_WATCH') {
+                            const watched = myPlayerInfo.sheriffWatchTargetIds || [];
+                            roleChoices.push({
+                                label: watched.includes(p.id) ? 'Bỏ theo dõi' : 'Theo dõi',
+                                onClick: () => {
+                                    socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'SHERIFF_WATCH', targetId: p.id });
+                                    showNotification(watched.includes(p.id) ? `Đã bỏ theo dõi ${displayName}.` : `Đã chọn theo dõi ${displayName}.`);
                                     renderPlayersGrid(currentGameState.players);
                                 }
                             });
@@ -2311,6 +2372,12 @@ function renderPlayersGrid(players) {
             } else if (myPlayerInfo.role === 'JAILER') {
                 canTarget = true; actionType = 'JAILER_SELECT';
                 if (myPlayerInfo.jailerSelectedTargetId === p.id) div.classList.add('targeted-jail');
+            } else if (myPlayerInfo.role === 'FLOWER_CHILD' && !myPlayerInfo.flowerChildUsed) {
+                canTarget = true; actionType = 'FLOWER_CHILD_PROTECT';
+                if (myPlayerInfo.flowerChildProtectedTargetId === p.id) div.classList.add('targeted-flower');
+            } else if (myPlayerInfo.role === 'GUARDIAN_WOLF' && !myPlayerInfo.guardianWolfUsed) {
+                canTarget = true; actionType = 'GUARDIAN_WOLF_PROTECT';
+                if (myPlayerInfo.guardianWolfProtectedTargetId === p.id) div.classList.add('targeted-guardian');
             }
 
             if (canTarget) {
@@ -2321,7 +2388,11 @@ function renderPlayersGrid(players) {
                         ? 'Nhấn để chọn mục tiêu báo thù'
                         : actionType === 'JAILER_SELECT'
                             ? 'Nhấn để chọn người sẽ bị giam đêm tới'
-                            : 'Nhấn để tạt nước thánh (chỉ 1 lần/game)';
+                            : actionType === 'FLOWER_CHILD_PROTECT'
+                                ? 'Nhấn để bảo vệ người này khỏi bị treo cổ hôm nay'
+                                : actionType === 'GUARDIAN_WOLF_PROTECT'
+                                    ? 'Nhấn để bảo vệ người này khỏi bị treo cổ hôm nay'
+                                    : 'Nhấn để tạt nước thánh (chỉ 1 lần/game)';
                 div.addEventListener('click', () => {
                     if (actionType === 'AVENGER_SELECT') {
                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
@@ -2331,6 +2402,16 @@ function renderPlayersGrid(players) {
                     if (actionType === 'JAILER_SELECT') {
                         socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
                         showNotification(`Đã chọn ${displayName} để giam đêm tới.`);
+                        return;
+                    }
+                    if (actionType === 'FLOWER_CHILD_PROTECT') {
+                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
+                        showNotification(`Đã bảo vệ ${displayName} khỏi bị treo cổ hôm nay.`);
+                        return;
+                    }
+                    if (actionType === 'GUARDIAN_WOLF_PROTECT') {
+                        socket.emit('playerAction', { roomCode: currentRoomCode, actionType, targetId: p.id });
+                        showNotification(`Đã chọn bảo vệ ${displayName} khỏi bị treo cổ hôm nay.`);
                         return;
                     }
 
@@ -2356,6 +2437,12 @@ function renderPlayersGrid(players) {
             if (myPlayerInfo && myPlayerInfo.role === 'JAILER' && myPlayerInfo.jailerSelectedTargetId === p.id) {
                 div.classList.add('targeted-jail');
             }
+            if (myPlayerInfo && myPlayerInfo.role === 'FLOWER_CHILD' && myPlayerInfo.flowerChildProtectedTargetId === p.id) {
+                div.classList.add('targeted-flower');
+            }
+            if (myPlayerInfo && myPlayerInfo.role === 'GUARDIAN_WOLF' && myPlayerInfo.guardianWolfProtectedTargetId === p.id) {
+                div.classList.add('targeted-guardian');
+            }
 
             div.addEventListener('click', () => {
                 if (myPlayerInfo && myPlayerInfo.role === 'AVENGER') {
@@ -2374,6 +2461,50 @@ function renderPlayersGrid(players) {
                             onClick: () => {
                                 socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'AVENGER_SELECT', targetId: p.id });
                                 showNotification(`Đã chọn ${displayName} làm mục tiêu báo thù.`);
+                            }
+                        },
+                        { label: 'Đóng' }
+                    ]);
+                    return;
+                }
+                if (myPlayerInfo && myPlayerInfo.role === 'FLOWER_CHILD' && !myPlayerInfo.flowerChildUsed) {
+                    const myVote = currentDayVotes.find(v => v.voterId === socket.id);
+                    const hasVote = myVote && myVote.targetId === p.id;
+                    openChoiceModal('Đứa Trẻ Hoa', `Chọn hành động với ${displayName}.`, [
+                        {
+                            label: hasVote ? 'Bỏ phiếu treo' : 'Bỏ phiếu',
+                            danger: true,
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'VOTE', targetId: p.id });
+                            }
+                        },
+                        {
+                            label: 'Bảo vệ khỏi treo',
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'FLOWER_CHILD_PROTECT', targetId: p.id });
+                                showNotification(`Đã bảo vệ ${displayName} khỏi bị treo cổ hôm nay.`);
+                            }
+                        },
+                        { label: 'Đóng' }
+                    ]);
+                    return;
+                }
+                if (myPlayerInfo && myPlayerInfo.role === 'GUARDIAN_WOLF' && !myPlayerInfo.guardianWolfUsed) {
+                    const myVote = currentDayVotes.find(v => v.voterId === socket.id);
+                    const hasVote = myVote && myVote.targetId === p.id;
+                    openChoiceModal('Sói Hộ Vệ', `Chọn hành động với ${displayName}.`, [
+                        {
+                            label: hasVote ? 'Bỏ phiếu treo' : 'Bỏ phiếu',
+                            danger: true,
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'VOTE', targetId: p.id });
+                            }
+                        },
+                        {
+                            label: 'Bảo vệ khỏi treo',
+                            onClick: () => {
+                                socket.emit('playerAction', { roomCode: currentRoomCode, actionType: 'GUARDIAN_WOLF_PROTECT', targetId: p.id });
+                                showNotification(`Đã chọn bảo vệ ${displayName} khỏi bị treo cổ hôm nay.`);
                             }
                         },
                         { label: 'Đóng' }

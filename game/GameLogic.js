@@ -69,6 +69,9 @@ class GameLogic {
         this.maidProtectedTargetIds = {};
         this.jailerSelectedTargetIds = {};
         this.jailerJailedTargetIds = {};
+        this.sheriffWatchTargetIds = {};
+        this.flowerChildProtectedTargetIds = {};
+        this.guardianWolfProtectedTargetIds = {};
         this.actionLog = [];
     }
 
@@ -113,6 +116,66 @@ class GameLogic {
         return !!this.getJailerIdForJailedTarget(socketId);
     }
 
+    getAlivePlayersExcept(excludedIds = []) {
+        const excluded = new Set(excludedIds.filter(Boolean));
+        return Object.values(this.players).filter(p => p.isAlive && !excluded.has(p.id));
+    }
+
+    getWerewolfKillerCandidate(targetId) {
+        const voters = Object.entries(this.werewolfVotes || {})
+            .filter(([, votedTargetId]) => votedTargetId === targetId)
+            .map(([voterId]) => this.players[voterId])
+            .filter(p => p && this.isWolfAligned(p));
+
+        if (voters.length > 0) return voters[Math.floor(Math.random() * voters.length)].id;
+
+        const wolves = Object.values(this.players).filter(p => p.isAlive && this.isWolfAligned(p));
+        return wolves.length > 0 ? wolves[Math.floor(Math.random() * wolves.length)].id : null;
+    }
+
+    buildSheriffSuspects(sheriffId, victimId, killerId) {
+        const suspects = [];
+        if (killerId && this.players[killerId] && killerId !== sheriffId && killerId !== victimId) {
+            suspects.push(killerId);
+        }
+
+        const fillers = shuffleArray(this.getAlivePlayersExcept([sheriffId, victimId, ...suspects]))
+            .map(p => p.id);
+
+        while (suspects.length < 2 && fillers.length > 0) {
+            suspects.push(fillers.shift());
+        }
+
+        return suspects;
+    }
+
+    notifySheriffResults(deaths, nightDeathEvidence) {
+        Object.entries(this.sheriffWatchTargetIds || {}).forEach(([sheriffId, watchedIds]) => {
+            const sheriff = this.players[sheriffId];
+            if (!sheriff || !sheriff.isAlive || sheriff.role !== 'SHERIFF') return;
+
+            (watchedIds || []).forEach(targetId => {
+                if (!deaths.has(targetId)) return;
+
+                const target = this.players[targetId];
+                const evidence = nightDeathEvidence.get(targetId);
+                if (!evidence || !evidence.direct) {
+                    this.io.to(sheriffId).emit('systemMessage', `${target?.name || 'Mục tiêu'} đã chết trong đêm, nhưng đây không phải cái chết trực tiếp nên bạn không tìm được nghi phạm.`);
+                    return;
+                }
+
+                const suspectIds = this.buildSheriffSuspects(sheriffId, targetId, evidence.killerId);
+                if (suspectIds.length === 0) {
+                    this.io.to(sheriffId).emit('systemMessage', `${target?.name || 'Mục tiêu'} đã chết trong đêm, nhưng bạn không tìm được nghi phạm phù hợp.`);
+                    return;
+                }
+
+                const suspectNames = suspectIds.map(id => this.players[id]?.name).filter(Boolean).join(', ');
+                this.io.to(sheriffId).emit('systemMessage', `Cảnh Sát Trưởng: ${target.name} đã chết. Nghi phạm có thể là: ${suspectNames}.`);
+            });
+        });
+    }
+
     getPlayerIdsInDisplayOrder() {
         const currentIds = Object.keys(this.players);
         if (this.state === 'LOBBY' || this.playerOrder.length === 0) return currentIds;
@@ -140,6 +203,10 @@ class GameLogic {
             loudmouthTargetId: null,
             avengerTargetId: null,
             jailerBullet: true,
+            flowerChildUsed: false,
+            flowerChildProtectedTargetId: null,
+            guardianWolfUsed: false,
+            guardianWolfProtectedTargetId: null,
             publiclyRevealedRole: false,
             deathCause: null
         };
@@ -152,11 +219,23 @@ class GameLogic {
         delete this.werewolfVotes?.[socketId];
         delete this.jailerSelectedTargetIds[socketId];
         delete this.jailerJailedTargetIds[socketId];
+        delete this.sheriffWatchTargetIds[socketId];
+        delete this.flowerChildProtectedTargetIds[socketId];
+        delete this.guardianWolfProtectedTargetIds[socketId];
         Object.keys(this.jailerSelectedTargetIds).forEach(jailerId => {
             if (this.jailerSelectedTargetIds[jailerId] === socketId) delete this.jailerSelectedTargetIds[jailerId];
         });
         Object.keys(this.jailerJailedTargetIds).forEach(jailerId => {
             if (this.jailerJailedTargetIds[jailerId] === socketId) delete this.jailerJailedTargetIds[jailerId];
+        });
+        Object.keys(this.sheriffWatchTargetIds).forEach(sheriffId => {
+            this.sheriffWatchTargetIds[sheriffId] = this.sheriffWatchTargetIds[sheriffId].filter(id => id !== socketId);
+        });
+        Object.keys(this.flowerChildProtectedTargetIds).forEach(flowerChildId => {
+            if (this.flowerChildProtectedTargetIds[flowerChildId] === socketId) delete this.flowerChildProtectedTargetIds[flowerChildId];
+        });
+        Object.keys(this.guardianWolfProtectedTargetIds).forEach(guardianId => {
+            if (this.guardianWolfProtectedTargetIds[guardianId] === socketId) delete this.guardianWolfProtectedTargetIds[guardianId];
         });
         this.playerOrder = this.playerOrder.filter(id => id !== socketId);
         // If host leaves, assign new host
@@ -346,6 +425,9 @@ class GameLogic {
         this.redLadyVisitTargets = {};
         this.maidProtectedTargetIds = {};
         this.jailerJailedTargetIds = {};
+        this.sheriffWatchTargetIds = {};
+        this.flowerChildProtectedTargetIds = {};
+        this.guardianWolfProtectedTargetIds = {};
         this.activateJailsForNight();
         Object.values(this.players).forEach(p => {
             p.auraSeerUsedTonight = false;
@@ -611,6 +693,25 @@ class GameLogic {
                 this.addActionLog(`${this.getPlayerLabel(player)} chọn ${this.getPlayerLabel(targetId)} làm mục tiêu báo thù.`, undefined, 'detail');
                 this.io.to(socketId).emit('systemMessage', `Đã chọn ${this.players[targetId].name} làm mục tiêu báo thù.`);
                 this.updateClientState();
+            } else if (actionType === 'SHERIFF_WATCH' && player.role === 'SHERIFF') {
+                if (!this.players[targetId] || !this.players[targetId].isAlive || targetId === socketId) {
+                    this.io.to(socketId).emit('error', 'Bạn phải chọn một người chơi còn sống khác để theo dõi.');
+                    return;
+                }
+                if (!this.sheriffWatchTargetIds[socketId]) this.sheriffWatchTargetIds[socketId] = [];
+                const targets = this.sheriffWatchTargetIds[socketId];
+                if (targets.includes(targetId)) {
+                    this.sheriffWatchTargetIds[socketId] = targets.filter(id => id !== targetId);
+                } else {
+                    if (targets.length >= 2) {
+                        this.io.to(socketId).emit('error', 'Cảnh Sát Trưởng chỉ được theo dõi tối đa 2 người mỗi đêm.');
+                        return;
+                    }
+                    targets.push(targetId);
+                }
+                this.addActionLog(`${this.getPlayerLabel(player)} theo dõi: ${this.sheriffWatchTargetIds[socketId].map(id => this.getPlayerLabel(id)).join(', ') || 'không ai'}.`, undefined, 'detail');
+                this.io.to(socketId).emit('systemMessage', `Đã chọn theo dõi: ${this.sheriffWatchTargetIds[socketId].map(id => this.players[id].name).join(', ') || 'không ai'}.`);
+                this.updateClientState();
             } else if (actionType === 'JAILER_EXECUTE' && player.role === 'JAILER') {
                 const jailedTargetId = this.jailerJailedTargetIds[socketId];
                 if (!jailedTargetId || jailedTargetId !== targetId || !this.players[targetId] || !this.players[targetId].isAlive) {
@@ -638,7 +739,7 @@ class GameLogic {
                     return;
                 }
                 this.nightActions = this.nightActions.filter(a => !a.type.startsWith('WITCH_'));
-                this.nightActions.push({ type: 'WITCH_POISON', targetId: targetId, priority: 4 });
+                this.nightActions.push({ type: 'WITCH_POISON', socketId, targetId: targetId, priority: 4 });
                 this.addActionLog(`${this.getPlayerLabel(player)} chọn đầu độc ${this.getPlayerLabel(targetId)}.`, undefined, 'detail');
                 this.broadcastRoleActionSfx('witchPoison');
             } else if (actionType === 'WITCH_NONE' && player.role === 'WITCH') {
@@ -676,6 +777,35 @@ class GameLogic {
             this.jailerSelectedTargetIds[socketId] = targetId;
             this.addActionLog(`${this.getPlayerLabel(player)} chọn giam ${this.getPlayerLabel(targetId)} vào đêm kế tiếp.`, undefined, 'detail');
             this.io.to(socketId).emit('systemMessage', `Đã chọn ${this.players[targetId].name} để giam vào đêm kế tiếp.`);
+            this.updateClientState();
+        } else if ((this.state === 'DAY' || this.state === 'VOTE') && actionType === 'FLOWER_CHILD_PROTECT' && player.role === 'FLOWER_CHILD') {
+            if (player.flowerChildUsed) {
+                this.io.to(socketId).emit('error', 'Bạn đã dùng quyền bảo vệ khỏi treo cổ rồi.');
+                return;
+            }
+            if (!this.players[targetId] || !this.players[targetId].isAlive || targetId === socketId) {
+                this.io.to(socketId).emit('error', 'Bạn phải chọn một người chơi còn sống khác để bảo vệ khỏi treo cổ.');
+                return;
+            }
+            player.flowerChildUsed = true;
+            player.flowerChildProtectedTargetId = targetId;
+            this.flowerChildProtectedTargetIds[socketId] = targetId;
+            this.addActionLog(`${this.getPlayerLabel(player)} bảo vệ ${this.getPlayerLabel(targetId)} khỏi bị treo cổ hôm nay.`);
+            this.io.to(socketId).emit('systemMessage', `Đã bảo vệ ${this.players[targetId].name} khỏi bị treo cổ trong ngày hôm nay.`);
+            this.updateClientState();
+        } else if ((this.state === 'DAY' || this.state === 'VOTE') && actionType === 'GUARDIAN_WOLF_PROTECT' && player.role === 'GUARDIAN_WOLF') {
+            if (player.guardianWolfUsed) {
+                this.io.to(socketId).emit('error', 'Bạn đã dùng quyền bảo vệ khỏi treo cổ rồi.');
+                return;
+            }
+            if (!this.players[targetId] || !this.players[targetId].isAlive || targetId === socketId) {
+                this.io.to(socketId).emit('error', 'Bạn phải chọn một người chơi còn sống khác để bảo vệ khỏi treo cổ.');
+                return;
+            }
+            player.guardianWolfProtectedTargetId = targetId;
+            this.guardianWolfProtectedTargetIds[socketId] = targetId;
+            this.addActionLog(`${this.getPlayerLabel(player)} chọn bảo vệ ${this.getPlayerLabel(targetId)} khỏi bị treo cổ hôm nay.`, undefined, 'detail');
+            this.io.to(socketId).emit('systemMessage', `Đã chọn bảo vệ ${this.players[targetId].name} khỏi bị treo cổ trong ngày hôm nay. Kỹ năng chỉ mất nếu bảo vệ thành công.`);
             this.updateClientState();
         } else if ((this.state === 'DAY' || this.state === 'VOTE') && actionType === 'AVENGER_SELECT' && player.role === 'AVENGER') {
             if (!this.players[targetId] || !this.players[targetId].isAlive || targetId === socketId) {
@@ -825,13 +955,13 @@ class GameLogic {
                 this.witchHealPotion = false;
                 this.addActionLog(`Phù Thủy dùng bình cứu ${this.getPlayerLabel(action.targetId)}.`);
             } else if (action.type === 'WEREWOLF_KILL') {
-                lethalAttacks.push({ targetId: action.targetId, source: 'WEREWOLF' });
+                lethalAttacks.push({ targetId: action.targetId, source: 'WEREWOLF', killerId: this.getWerewolfKillerCandidate(action.targetId) });
             } else if (action.type === 'WITCH_POISON') {
-                lethalAttacks.push({ targetId: action.targetId, source: 'WITCH' });
+                lethalAttacks.push({ targetId: action.targetId, source: 'WITCH', killerId: action.socketId });
                 this.witchPoisonPotion = false;
                 this.addActionLog(`Phù Thủy ném bình độc vào ${this.getPlayerLabel(action.targetId)}.`);
             } else if (action.type === 'JAILER_EXECUTE') {
-                lethalAttacks.push({ targetId: action.targetId, source: 'JAILER' });
+                lethalAttacks.push({ targetId: action.targetId, source: 'JAILER', killerId: action.socketId });
                 this.addActionLog(`Giám Ngục xử tử ${this.getPlayerLabel(action.targetId)} trong nhà giam.`);
             } else if (action.type === 'ARSONIST_DOUSE') {
                 action.targetIds.forEach(id => {
@@ -843,7 +973,7 @@ class GameLogic {
             } else if (action.type === 'ARSONIST_IGNITE') {
                 this.arsonistDoused.forEach(id => {
                     if (this.players[id] && this.players[id].isAlive) {
-                        lethalAttacks.push({ targetId: id, source: 'ARSONIST' });
+                        lethalAttacks.push({ targetId: id, source: 'ARSONIST', killerId: action.socketId });
                     }
                 });
                 this.arsonistDoused = [];
@@ -887,6 +1017,8 @@ class GameLogic {
             }
         };
         let deaths = new Set();
+        const nightDeathEvidence = new Map();
+        const cursedTurnedIds = new Set();
         const attackedTargets = new Set(lethalAttacks
             .filter(attack => !(jailProtectedTargets.has(attack.targetId) && attack.source !== 'JAILER'))
             .map(attack => attack.targetId));
@@ -908,6 +1040,14 @@ class GameLogic {
             }
             
             if (attack.source === 'WEREWOLF') {
+                if (attackedPlayer && attackedPlayer.role === 'CURSED') {
+                    attackedPlayer.role = 'WEREWOLF';
+                    attackedPlayer.isWolfAligned = true;
+                    cursedTurnedIds.add(attack.targetId);
+                    this.addActionLog(`${this.getPlayerLabel(attackedPlayer)} bị sói tấn công và biến thành Ma Sói.`);
+                    continue;
+                }
+
                 if (this.players[attack.targetId] && this.players[attack.targetId].role === 'ARSONIST') {
                     continue; // Arsonist immune to werewolf kill
                 }
@@ -951,6 +1091,9 @@ class GameLogic {
                 ARSONIST: 'bị đốt cháy chết',
                 JAILER: 'bị Giám Ngục xử tử'
             };
+            if (!nightDeathEvidence.has(attack.targetId)) {
+                nightDeathEvidence.set(attack.targetId, { source: attack.source, killerId: attack.killerId, direct: true });
+            }
             markDeath(attack.targetId, deathCauses[attack.source] || 'chết trong đêm');
         }
 
@@ -968,6 +1111,12 @@ class GameLogic {
 
         deaths = this.applyDeaths(Array.from(pendingDeaths, ([id, cause]) => ({ id, cause })), 'chết trong đêm');
         deaths.forEach(id => this.io.to(id).emit('systemMessage', 'Bạn đã chết trong đêm qua.'));
+        cursedTurnedIds.forEach(id => {
+            if (!this.players[id] || !this.players[id].isAlive) return;
+            this.io.to(id).emit('roleAssigned', 'WEREWOLF');
+            this.io.to(id).emit('systemMessage', 'Bạn đã bị Ma Sói tấn công. Bạn không chết, nhưng từ giờ bạn là Ma Sói thường và thắng với phe Sói.');
+        });
+        this.notifySheriffResults(deaths, nightDeathEvidence);
 
         this.arsonistDoused = this.arsonistDoused.filter(id => this.players[id] && this.players[id].isAlive);
         this.arsonistNewlyDoused = newlyDousedTonight.filter(id => this.players[id] && this.players[id].isAlive);
@@ -1001,6 +1150,9 @@ class GameLogic {
         this.sleptThisNightId = null;
         this.doctorProtectedTargetId = null;
         this.jailerJailedTargetIds = {};
+        this.sheriffWatchTargetIds = {};
+        this.flowerChildProtectedTargetIds = {};
+        this.guardianWolfProtectedTargetIds = {};
         this.updateClientState();
         this.arsonistNewlyDoused.forEach(id => {
             this.io.to(id).emit('systemMessage', 'Sáng nay bạn phát hiện mình đã bị Arsonist tưới xăng từ đêm qua.');
@@ -1100,6 +1252,44 @@ class GameLogic {
             'VILLAGER': 'Dân Làng'
         };
 
+        let flowerProtected = false;
+        let guardianProtected = false;
+        if (lynchedId) {
+            const protectorId = Object.entries(this.flowerChildProtectedTargetIds || {}).find(([flowerChildId, protectedTargetId]) => {
+                const flowerChild = this.players[flowerChildId];
+                return protectedTargetId === lynchedId && flowerChild && flowerChild.isAlive && flowerChild.role === 'FLOWER_CHILD';
+            })?.[0];
+
+            if (protectorId) {
+                const protector = this.players[protectorId];
+                flowerProtected = true;
+                this.addActionLog(`${this.getPlayerLabel(protector)} ngăn cả làng treo cổ ${this.getPlayerLabel(lynchedId)}.`);
+                this.broadcastSystemMessage(`Đứa Trẻ Hoa ${protector.name} đã bảo vệ ${this.players[lynchedId].name}. Không ai bị treo cổ hôm nay.`);
+                lynchedId = null;
+            }
+        }
+
+        if (lynchedId) {
+            const guardianId = Object.entries(this.guardianWolfProtectedTargetIds || {}).find(([guardianWolfId, protectedTargetId]) => {
+                const guardianWolf = this.players[guardianWolfId];
+                return protectedTargetId === lynchedId
+                    && guardianWolf
+                    && guardianWolf.isAlive
+                    && guardianWolf.role === 'GUARDIAN_WOLF'
+                    && !guardianWolf.guardianWolfUsed;
+            })?.[0];
+
+            if (guardianId) {
+                const guardian = this.players[guardianId];
+                guardian.guardianWolfUsed = true;
+                guardian.guardianWolfProtectedTargetId = null;
+                guardianProtected = true;
+                this.addActionLog(`${this.getPlayerLabel(guardian)} ngăn cả làng treo cổ ${this.getPlayerLabel(lynchedId)}.`);
+                this.broadcastSystemMessage(`Sói Hộ Vệ đã bảo vệ ${this.players[lynchedId].name}. Không ai bị treo cổ hôm nay.`);
+                lynchedId = null;
+            }
+        }
+
         if (lynchedId) {
             const deaths = this.applyDeaths([{ id: lynchedId, cause: 'bị dân làng treo cổ' }]);
             this.addActionLog(`Cả làng vote treo cổ ${this.getPlayerLabel(lynchedId)}.`);
@@ -1119,8 +1309,13 @@ class GameLogic {
             }
         } else {
             this.addActionLog('Cả làng không treo cổ ai.');
-            this.broadcastSystemMessage(`Dân làng không thể thống nhất quyết định. Không ai bị treo cổ hôm nay.`);
+            if (!flowerProtected && !guardianProtected) {
+                this.broadcastSystemMessage(`Dân làng không thể thống nhất quyết định. Không ai bị treo cổ hôm nay.`);
+            }
         }
+
+        this.flowerChildProtectedTargetIds = {};
+        this.guardianWolfProtectedTargetIds = {};
 
         if (!this.checkWinCondition()) {
             setTimeout(() => {
@@ -1212,6 +1407,8 @@ class GameLogic {
         this.maidProtectedTargetIds = {};
         this.jailerSelectedTargetIds = {};
         this.jailerJailedTargetIds = {};
+        this.sheriffWatchTargetIds = {};
+        this.flowerChildProtectedTargetIds = {};
 
         Object.values(this.players).forEach(p => {
             p.role = null;
@@ -1224,6 +1421,10 @@ class GameLogic {
             p.loudmouthTargetId = null;
             p.avengerTargetId = null;
             p.jailerBullet = true;
+            p.flowerChildUsed = false;
+            p.flowerChildProtectedTargetId = null;
+            p.guardianWolfUsed = false;
+            p.guardianWolfProtectedTargetId = null;
             p.publiclyRevealedRole = false;
             p.deathCause = null;
         });
@@ -1344,6 +1545,11 @@ class GameLogic {
                     maidProtectedTargetId: this.players[socketId].role === 'MAID' ? this.maidProtectedTargetIds[socketId] || null : null,
                     loudmouthTargetId: this.players[socketId].role === 'LOUDMOUTH' ? this.players[socketId].loudmouthTargetId : null,
                     avengerTargetId: this.players[socketId].role === 'AVENGER' ? this.players[socketId].avengerTargetId : null,
+                    sheriffWatchTargetIds: this.players[socketId].role === 'SHERIFF' ? this.sheriffWatchTargetIds[socketId] || [] : [],
+                    flowerChildUsed: this.players[socketId].role === 'FLOWER_CHILD' ? this.players[socketId].flowerChildUsed === true : false,
+                    flowerChildProtectedTargetId: this.players[socketId].role === 'FLOWER_CHILD' ? this.flowerChildProtectedTargetIds[socketId] || null : null,
+                    guardianWolfUsed: this.players[socketId].role === 'GUARDIAN_WOLF' ? this.players[socketId].guardianWolfUsed === true : false,
+                    guardianWolfProtectedTargetId: this.players[socketId].role === 'GUARDIAN_WOLF' ? this.guardianWolfProtectedTargetIds[socketId] || null : null,
                     jailerSelectedTargetId: this.players[socketId].role === 'JAILER' ? this.jailerSelectedTargetIds[socketId] || null : null,
                     jailerJailedTargetId: this.players[socketId].role === 'JAILER' ? this.jailerJailedTargetIds[socketId] || null : null,
                     jailerBullet: this.players[socketId].role === 'JAILER' ? this.players[socketId].jailerBullet !== false : false,
